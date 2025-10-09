@@ -16,7 +16,9 @@ Anyway, this web app was developed in a very rushed way, with large sections rec
 ## Overview
 
 Let's go over what we have in terms of resources and code.
-The first thing we bought were our domains, one `.com.pl` and another simple `.pl` one, the latter of which we bought after my partner soberly noticed that it would be a pain to remember and type anything as long as the former when opening the web app. In retrospect, I regret buying the first one at all - the monopoly on `com.pl` domains is held by [domena.pl](https://domena.pl), and while they're cheap enough, their offering and UX is straight from the early 00s - there's no CLI, no API, just poorly-explained HTML forms to click through and several different admin panels for each feature. We ended up only using the .com.pl one for our Google Workspace emails (maybe not the best choice either - their invoices are denominated in arms and legs).
+The first thing we bought were our domains, one `.com.pl` and another simple `.pl` one, the latter of which we bought after my partner soberly noticed that it would be a pain to remember and type anything as long as the former when opening the web app. In retrospect, I regret buying the first one at all - the monopoly on `com.pl` domains is held by [domena.pl](https://domena.pl), and while they're cheap enough, their offering and UX is straight from the early 00s - there's no CLI, no API, just poorly-explained HTML forms to click through and several different admin panels for each feature.
+
+They also still think you're interested in shared PHP hosting, bless their hearts. We ended up only using the .com.pl domain for our Google Workspace emails (maybe not the best choice either - their invoices are denominated in arms and legs).
 
 Next was the hosting - we went with Hetzner, as we didn't need much and aren't likely to need much in the future either. We got a VPS with 4 VCPUs, 8 GB of RAM and 160GB storage, which at the time of writing isn't close to even one-quarter full, plus two S3-compatible object buckets (which reminds me: they charge a flat fee per bucket and eliminating one of them in production will be something we'll do later in this series).
 The other things we pay for are a Twilio account with two phone numbers, an OpenAI one, and Postmark for transactional e-mails like forgot-password reset links.
@@ -29,6 +31,14 @@ As for what the software we've built and deployed looks like, it goes like this:
 - All three of the above exist in two copies, one for the production environment and one for demos
 - Mostly static landing page ("unfucking" which will be done in this post), done in Sveltekit.
 - All of this is exposed to the outside world with different subdomains by an instance of Nginx with Certbot.
+
+>*Why Angular and not React or Svelte?*
+
+At the time that was what I knew best and hated least. I've had the pleasure of checking out modern React in another project since and would have likely picked it over Angular had I known how far it had come since I'd last used it in college, though I still notice some "Angularisms" in the way I write React (think separate service classes for data access and so on). It doesn't railroad you into its whole ecosystem nearly the same way - you get to `await` and `fetch` stuff as God ordained rather than pull in a whole another library to do `.subscribe` continuation-passing - but I'm not a fan of the `&&` and `||` syntax in JSX, Angular did it much better with normal `@if` blocks since version 17.
+
+>*Why not \[insert meme Rust WASM framework du jour\] or HTMX?*
+
+Please. That'd be way too much of a break from how I'm accustomed to do stuff, and there's only so much experimentation you get to do when you're the CTO solely responsible for the IT side of a small business.
 
 
 >*Why Rust for what seems to be just web-slop CRUD?*
@@ -277,7 +287,10 @@ jobs:
           provenance: false
 ```
 
-What this does is react to pull requests and pushes to `main`, build the image, and in the case of a push upload it to a namespace in the registry named after our Github org. Not pictured: me naming the file with a comma instead of a period in its name and struggling for an embarrassingly long tiome.
+What this does is react to pull requests and pushes to `main`, build the image, and in the case of a push upload it to a namespace in the registry named after our Github org.
+
+Not pictured: me naming the file with a comma instead of a period in its name and struggling for an embarrassingly long tiome.
+
 Also not pictured: me not knowing that when you have a GitHub organization where you placed your repo, you first have to set an org-level flag that repository actions are allowed to modify things, *then* set the same one on the individual repo's level, *then* manually push the image from your own machine with a personal access token (the obsolete "classic" kind no less) so the package exists, because otherwise you can't whitelist the repo as allowed to modify that particular package. If you don't do this, you'll get a 403 error on push that will look like you just misconfigured something.
 
 ### 3: Removing the dedicated docker-compose

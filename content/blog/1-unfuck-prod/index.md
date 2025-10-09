@@ -277,7 +277,7 @@ jobs:
           provenance: false
 ```
 
-What this does is react to pull requests and pushes to `main`, build the image, and in the case of a push upload it to a namespace in the registry named after our Github org. Not pictured: me naming the file with a comma instead of a period in its name and struggling for an embarassingly long tiome.
+What this does is react to pull requests and pushes to `main`, build the image, and in the case of a push upload it to a namespace in the registry named after our Github org. Not pictured: me naming the file with a comma instead of a period in its name and struggling for an embarrassingly long tiome.
 Also not pictured: me not knowing that when you have a GitHub organization where you placed your repo, you first have to set an org-level flag that repository actions are allowed to modify things, *then* set the same one on the individual repo's level, *then* manually push the image from your own machine with a personal access token (the obsolete "classic" kind no less) so the package exists, because otherwise you can't whitelist the repo as allowed to modify that particular package. If you don't do this, you'll get a 403 error on push that will look like you just misconfigured something.
 
 ### 3: Removing the dedicated docker-compose

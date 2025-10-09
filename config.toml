@@ -1,8 +1,13 @@
 # The URL the site will be built for
 base_url = "https://janligudzinski.github.io"
-site_name = "Jan Ligudziński's blog"
+title = "Jan Ligudziński"
 description = "Mostly programming"
 theme = "duckquill"
+
+taxonomies = [
+  {name = "tags"},
+  {name = "categories"},
+]
 
 # Whether to automatically compile all Sass files in the sass directory
 compile_sass = true
@@ -16,4 +21,8 @@ build_search_index = true
 highlight_code = true
 
 [extra]
-# Put all your custom variables here
+[extra.nav]
+  links = [
+    { name = "Home", url = "/" },
+    { name = "Blog", url = "/blog/" }
+  ]

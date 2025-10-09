@@ -1,5 +1,8 @@
 # The URL the site will be built for
 base_url = "https://janligudzinski.github.io"
+site_name = "Jan Ligudziński's blog"
+description = "Mostly programming"
+theme = "duckquill"
 
 # Whether to automatically compile all Sass files in the sass directory
 compile_sass = true

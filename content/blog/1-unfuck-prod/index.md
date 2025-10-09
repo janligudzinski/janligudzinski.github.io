@@ -295,7 +295,7 @@ Also not pictured: me not knowing that when you have a GitHub organization where
 
 ### 3: Removing the dedicated docker-compose
 
-We don't really need a full docker-compose for one app. Ideally, the whole machine should have just one docker-compose file that defines literally everything running on it, but for today we'll be satisfied with reducing the count of compose templates from 6 (main app, main app demo, AI app, AI app demo, landing page, reverse proxy) to 5. We'll do something ugly and fold it into the Nginx one, which over time as we clean more things up and outsource them to the registry rather than building on the spot, will contain more and more of our system.
+We don't really need a full docker-compose for one app. Ideally (relative to this), the whole machine should have just one docker-compose file that defines literally everything running on it, but for today we'll be satisfied with reducing the count of compose templates from 6 (main app, main app demo, AI app, AI app demo, landing page, reverse proxy) to 5. We'll do something ugly and fold it into the Nginx one, which over time as we clean more things up and outsource them to the registry rather than building on the spot, will contain more and more of our system.
 
 ### 4: Let's yeet Nginx completely!
 

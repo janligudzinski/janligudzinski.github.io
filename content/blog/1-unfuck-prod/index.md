@@ -291,11 +291,96 @@ What this does is react to pull requests and pushes to `main`, build the image, 
 
 Not pictured: me naming the file with a comma instead of a period in its name and struggling for an embarrassingly long tiome.
 
-Also not pictured: me not knowing that when you have a GitHub organization where you placed your repo, you first have to set an org-level flag that repository actions are allowed to modify things, *then* set the same one on the individual repo's level, *then* manually push the image from your own machine with a personal access token (the obsolete "classic" kind no less) so the package exists, because otherwise you can't whitelist the repo as allowed to modify that particular package. If you don't do this, you'll get a 403 error on push that will look like you just misconfigured something.
+Also not pictured: me not knowing that when you have a fresh GitHub organization where you placed your repo and have already pushed a package by a given name manually, you first have to set an org-level flag that repository actions are allowed to modify things, *then* set the same one on the individual repo's level, *then* manually push the image from your own machine with a personal access token (the obsolete "classic" kind no less) so the package exists, because otherwise you can't whitelist the repo as allowed to modify that particular package. If you don't do this, you'll get a 403 error on push that will look like you just misconfigured something. Per [Github docs](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry#pushing-container-images):
+
+>The easiest way to connect a repository to a container package is to publish the package from a workflow using `${{secrets.GITHUB_TOKEN}}`, as the repository that contains the workflow is linked automatically. Note that the `GITHUB_TOKEN` will not have permission to push the package if you have previously pushed a package to the same namespace, but have not connected the package to the repository.
 
 ### 3: Removing the dedicated docker-compose
 
 We don't really need a full docker-compose for one app. Ideally (relative to this), the whole machine should have just one docker-compose file that defines literally everything running on it, but for today we'll be satisfied with reducing the count of compose templates from 6 (main app, main app demo, AI app, AI app demo, landing page, reverse proxy) to 5. We'll do something ugly and fold it into the Nginx one, which over time as we clean more things up and outsource them to the registry rather than building on the spot, will contain more and more of our system.
+First, since we've pushed our image to the GHCR, we're going to ssh onto our machine and log in with a PAT:
+
+```bash
+$ echo $CR_PAT | docker login ghcr.io -u USERNAME --password-stdin
+WARNING! Your password will be stored unencrypted in /root/.docker/config.json.
+Configure a credential helper to remove this warning. See
+https://docs.docker.com/engine/reference/commandline/login/#credential-stores
+
+Login Succeeded
+$ docker pull ghcr.io/element-group-com-pl/element-landing-page
+Using default tag: latest
+latest: Pulling from element-group-com-pl/element-landing-page
+2d35ebdb57d9: Pull complete
+9d523be8e709: Pull complete
+7d809136e3e8: Pull complete
+ddaa38e0ffb2: Pull complete
+6e7b480dd868: Pull complete
+80e4cb152b36: Pull complete
+e63fe1dda577: Pull complete
+bf3a568cc0b6: Pull complete
+9e0c240541c7: Pull complete
+Digest: sha256:083f0728600db5aefa5b63007789f7acdee38bdc99fd1c3644d76be048c28b54
+Status: Downloaded newer image for ghcr.io/element-group-com-pl/element-landing-page:latest
+ghcr.io/element-group-com-pl/element-landing-page:latest
+```
+
+>*What about the unencrypted token it warned you about?*
+
+I'm not stressed about it. One, if someone gets my SSH key and can read that file on my machine, I have way bigger problems, two, I can just revoke it, three, it can't do anything but pull:
+
+![Pull-only token settings](token.png)
+
+Now it's just a question of shutting down the old container, removing it:
+
+```
+docker-compose down
+cd ..
+rm -r element-landing-page
+```
+
+Going into our nginx compose directory, and editing the `docker-compose.yml` to add our landing page service:
+
+```yaml
+version: '3'
+
+services:
+  landing-page:
+    image: ghcr.io/element-group-com-pl/element-landing-page:latest
+    pull_policy: always
+    environment:
+      - NODE_ENV=production
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # this is so we can access the API on the same machine; the canonical solution we'll use eventually is putting both in the same docker-compose network
+    ports:
+      - "4000:4000"
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./nginx/certs:/etc/nginx/certs
+      - ./certbot/www:/var/www/certbot
+      - ./certbot/conf:/etc/letsencrypt
+      - /var/www/element-landing:/var/www/element-landing:ro
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - ./certbot/www:/var/www/certbot
+      - ./certbot/conf:/etc/letsencrypt
+    depends_on:
+      - nginx
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+```
+
+And because we already have a `.conf` file for this service in place, reverse-proxying our main domain to port 4000, all we need is a `docker compose up-d` to run the new setup.
 
 ### 4: Let's yeet Nginx completely!
 

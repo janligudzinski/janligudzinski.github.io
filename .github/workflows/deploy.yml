@@ -21,8 +21,8 @@ jobs:
 
       - name: Build Zola site using Docker
         run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/site \
+          docker run --rm -v $PWD:/app \
+            -v ${{ github.workspace }}:/app \
             ghcr.io/getzola/zola:v0.17.1 build
 
       - name: Deploy to GitHub Pages

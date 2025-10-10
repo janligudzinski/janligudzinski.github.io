@@ -22,14 +22,14 @@ jobs:
           submodules: recursive
 
       - name: Pull Zola Docker image
-        run: docker pull ghcr.io/getzola/zola:v0.17.1
+        run: docker pull ghcr.io/getzola/zola:v0.21.0
 
       - name: Build Zola site using Docker
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/site" \
             -w /site \
-            ghcr.io/getzola/zola:v0.17.1 \
+            ghcr.io/getzola/zola:v0.21.0 \
             build
 
       - name: Deploy to GitHub Pages

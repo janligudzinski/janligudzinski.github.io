@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml"  lang="en" >
+<head>
+	<!-- 2025-10-10 Fri 13:20 -->
+	<meta charset="UTF-8" />
+	<meta name="description" content="Mostly programming" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<meta name="theme-color" content="#9a9996" />
+	<title>In which I fix a nasty production system: #1 - Landing page - Jan Ligudziński</title>
+	<link rel="canonical" href="https://janligudzinski.github.io/blog/1-nasty-system-1/" /><link rel="icon" type="image/png" href="https://janligudzinski.github.io/favicon.png" />
+
+<link rel="apple-touch-icon" type="image/png" sizes="180x180" href="https://janligudzinski.github.io/apple-touch-icon.png" />
+<style type="text/css">
+	:root {--accent-color: #6f8396;}</style>
+
+			<link type="text/css" rel="stylesheet" href="https://janligudzinski.github.io/style.css" />
+				<link type="text/css" rel="stylesheet" href="https://janligudzinski.github.io/syntax-theme-light.css" media="(prefers-color-scheme: light)" />
+				<link type="text/css" rel="stylesheet" href="https://janligudzinski.github.io/syntax-theme-dark.css" media="(prefers-color-scheme: dark)" />
+			<script type="text/javascript" defer  src="https://janligudzinski.github.io/closable.js"></script>
+
+	<meta property="og:site_name" content="Jan Ligudziński" />
+	<meta property="og:title" content="In which I fix a nasty production system: #1 - Landing page - Jan Ligudziński" />
+	<meta property="og:url" content="https://janligudzinski.github.io/blog/1-nasty-system-1/" />
+	<meta property="og:description" content="If only you knew how bad things really are." /><meta property="og:image" content="https://janligudzinski.github.io/card.png" /><meta property="og:locale" content="en_US" />
+</head>
+
+<body>
+
+		
+<header id="site-nav">
+	<nav>
+		<a href="#main-content" tabindex="0">
+			Skip to Main Content
+		</a>
+		<ul>
+			<li id="home">
+				<a href="https://janligudzinski.github.io">
+					<i class="icon"></i>Jan Ligudziński</a>
+			</li>
+			<li class="divider"></li>
+					<li>
+						<a href="https://janligudzinski.github.io">Home</a>
+					</li>
+					<li>
+						<a href="https://janligudzinski.github.io/blog">Blog</a>
+					</li>
+				<li id="search">
+					<button id="search-toggle" class="circle" title="Search">
+						<i class="icon"></i>
+					</button>
+				</li>
+		</ul>
+	</nav>
+		<div id="search-container">
+			<label for="search-bar" class="visually-hidden">Search</label>
+			<input id="search-bar" placeholder="Search for…" autocomplete="off" type="search" disabled>
+			<div id="search-results-container">
+				<div id="search-results"></div>
+			</div>
+		</div>
+</header>
+<main id="main-content">
+		<article><div id="heading"><p>
+				<small>
+					<time datetime=" 2025-10-09T00:00:00+00:00">Published on
+						October 09, 2025</time></small>
+			</p><h1>In which I fix a nasty production system: #1 - Landing page</h1><p>
+				<small><span>By Jan Ligudziński</span></small>
+			</p>
+				<ul class="tags"><li><a class="tag" href="https://janligudzinski.github.io/tags/nasty-system/">nasty system</a></li><li><a class="tag" href="https://janligudzinski.github.io/tags/programming/">programming</a></li><li><a class="tag" href="https://janligudzinski.github.io/tags/rust/">rust</a></li><li><a class="tag" href="https://janligudzinski.github.io/tags/devops/">devops</a></li><li><a class="tag" href="https://janligudzinski.github.io/tags/docker/">docker</a></li><li><a class="tag" href="https://janligudzinski.github.io/tags/compose/">compose</a></li><li><a class="tag" href="https://janligudzinski.github.io/tags/war-story/">war story</a></li>
+				</ul>
+	</div>
+
+	<div id="buttons-container"><a id="go-to-top" href="#top" title="Go to Top"><i class="icon"></i></a></div><h2 id="intro">Intro</h2>
+<p>I help a friend of mine run a small company that does work on tenements for property managers. You may ask yourself what such a company even needs a programmer for, and the answer is that we offer our clients a web app where they can keep track of all the requests for work and our updates on them, as well as an AI agent that takes calls from tenants and notes down any complaints or requests they may have. We in turn use it to talk to the clients in an organized way, keep tabs on our subcontractors, and generate some standard paper printouts for them to sign.
+We also wanted to do some telemetry stuff with radio-enabled digital sensors - think water meters and such - at one point and may still do it in the future.
+Anyway, this web app was developed in a very rushed way, with large sections recklessly vibe-coded, and while it’s almost feature-complete for the foreseeable future, the time has come to take stock of all the tech debt and all the “I’ll do it laters” that have accumulated over this year.</p>
+<h2 id="overview">Overview</h2>
+<p>Let’s go over what we have in terms of resources and code.
+The first thing we bought were our domains, one <code>.com.pl</code> and another simple <code>.pl</code> one, the latter of which we bought after my partner soberly noticed that it would be a pain to remember and type anything as long as the former when opening the web app. In retrospect, I regret buying the first one at all - the monopoly on <code>com.pl</code> domains is held by <a href="https://domena.pl">domena.pl</a>, and while they’re cheap enough, their offering and UX is straight from the early 00s - there’s no CLI, no API, just poorly-explained HTML forms to click through and several different admin panels for each feature.</p>
+<p>They also still think you’re interested in shared PHP hosting, bless their hearts. We ended up only using the .com.pl domain for our Google Workspace emails (maybe not the best choice either - their invoices are denominated in arms and legs).</p>
+<p>Next was the hosting - we went with Hetzner, as we didn’t need much and aren’t likely to need much in the future either. We got a VPS with 4 VCPUs, 8 GB of RAM and 160GB storage, which at the time of writing isn’t close to even one-quarter full, plus two S3-compatible object buckets (which reminds me: they charge a flat fee per bucket and eliminating one of them in production will be something we’ll do later in this series).
+The other things we pay for are a Twilio account with two phone numbers, an OpenAI one, and Postmark for transactional e-mails like forgot-password reset links.</p>
+<p>As for what the software we’ve built and deployed looks like, it goes like this:</p>
+<ul>
+<li>Core app backend: Rust Axum, PostgreSQL over SeaORM, Redis (for sessions)</li>
+<li>Core app frontend: Angular with Bulma (Bootstrap is passé and I didn’t want to come up with Tailwind styles for everything myself)</li>
+<li>AI app backend: Axum again (the quick and dirty prototype was in C#)</li>
+<li>All three of the above exist in two copies, one for the production environment and one for demos</li>
+<li>Mostly static landing page (“unfucking” which will be done in this post), done in Sveltekit.</li>
+<li>All of this is exposed to the outside world with different subdomains by an instance of Nginx with Certbot.</li>
+</ul>
+<blockquote>
+<p><em>Why Angular and not React or Svelte?</em></p>
+</blockquote>
+<p>At the time that was what I knew best and hated least. I’ve had the pleasure of checking out modern React in another project since and would have likely picked it over Angular had I known how far it had come since I’d last used it in college, though I still notice some “Angularisms” in the way I write React (think separate service classes for data access and so on). It doesn’t railroad you into its whole ecosystem nearly the same way - you get to <code>await</code> and <code>fetch</code> stuff as God ordained rather than pull in a whole another library to do <code>.subscribe</code> continuation-passing - but I’m not a fan of the <code>&amp;&amp;</code> and <code>||</code> syntax in JSX, Angular did it much better with normal <code>@if</code> blocks since version 17.</p>
+<blockquote>
+<p><em>Why not [insert meme Rust WASM framework du jour] or HTMX?</em></p>
+</blockquote>
+<p>Please. That’d be way too much of a break from how I’m accustomed to do stuff, and there’s only so much experimentation you get to do when you’re the CTO solely responsible for the IT side of a small business.</p>
+<blockquote>
+<p><em>Why Rust for what seems to be just web-slop CRUD?</em></p>
+</blockquote>
+<p>Because I like the language and wanted to keep sharp in it. Also, if I had chosen to do the same thing at my side business as I had been doing at my day job at the time (C# and Blazor Server<sup class="footnote-reference" id="fr-1-1"><a href="#fn-1">1</a></sup>), I’d have wanted to blow my brains out.</p>
+<h2 id="why-s-it-fucked">Why’s it fucked?</h2>
+<p>Let me go over the things that are wrong with the current setup, in no particular order:</p>
+<h3 id="no-proper-ci-cd-horrific-manual-deployment-i-have-complacently-gotten-used-to-the-horror">No proper CI/CD, horrific manual deployment (I have complacently gotten used to the horror)</h3>
+<p>We don’t really have automatic builds or deploys. The first time I deployed the app, I pushed its code and Docker-Compose template over SSH, ran <code>docker-compose build</code> then <code>docker-compose up -d</code> (struggling with typos and configs omitted). The update procedure is now much the same: <code>docker-compose build &amp;&amp; docker-compose down &amp;&amp; docker-compose up-d</code>, and we are lucky to only have users in one timezone that keep regular hours so we can afford the downtime.</p>
+<blockquote>
+<p><em>Downtime?!</em></p>
+</blockquote>
+<p>It’s only half a minute at worst, but it’d still be a bad look for me to do things this way during the working day so it happens at night.</p>
+<p>We keep environment variables in <code>.env</code> files, which I think is fine, but we just have the one master <code>.env</code> that we share across all apps. How do we solve multiple environments then? Easy, we clone the same repo into other directories for the demo versions, change the relevant vars, knock out the shared parts like the database service, and run the same <code>docker-compose</code> commands in there.</p>
+<p>How did I manage routing new domains through our Nginx reverse-proxy when I added each app and environment? I don’t even know! I SSHed into the machine with Cursor and told it “refresh the damn certificates”. <em>Not</em> maintainable or documentable.</p>
+<blockquote>
+<p><em>💀💀💀</em></p>
+</blockquote>
+<p>If you are horrified, I am also; my intent and hope with these posts is that writing this out and pulling all this dirty laundry into the open sunlight will shame me into fixing these things and making my work look professional.</p>
+<h3 id="no-dedicated-backups">No dedicated backups</h3>
+<p>We have whole-machine backups that come with Hetzner, and every so often I manually dump the database, but this seriously needs to change.</p>
+<h3 id="poor-observability">Poor observability</h3>
+<p>We use the <code>log</code> crate in our backend apps, which is good (but not as good as <code>tracing</code> prescribed by Luca Palmieri’s excellent <a href="https://www.zero2prod.com/index.html"><em>Zero To Production</em></a>). We log to stdout, which is bad, because then I need to actually log onto the server and do <code>docker-compose logs</code> to see them. You can easily see how this isn’t really viable for problems that have occurred a while ago. Something on my to-do I-’ll-get-around-to-someday list is making these logs actually possible to browse and read. We also don’t have an easy way to check the metrics of our machine without going into its Hetzner panel. If we had one, it would be great if we could correlate it to the logs too - see if CPU spikes when a particular endpoint runs, for example.</p>
+<h3 id="poor-code">Poor code</h3>
+<p>Many features were rushed, especially the earliest ones at the core of the app. The conversations that led to things happening in this way when we were new to the whole “running a business that has an app” thing and excited for it went mostly like this:</p>
+<blockquote>
+<p>Partner: “Hey, Janek, can we have that thing running by tomorrow? I told the client I’d show it tomorrow.” (It is already evening)</p>
+<p>Me: “Sure.”</p>
+<p>(Vibe-coding and manual testing ensues)</p>
+<p>(My partner proceeds to not show the feature off the next day because the client rescheduled)</p>
+</blockquote>
+<p>This lack of time taken to slow down, rethink, refactor, has over time led to many code smells such as:</p>
+<ul>
+<li>Massive files that do too many things (especially Angular components)</li>
+<li>Dead code that doesn’t actually run</li>
+<li>The same things repeated in multiple places</li>
+<li>Overgrown, cancerous patterns</li>
+</ul>
+<p>For a concrete example of that last one, one low-hanging fruit is that as good little disciples of the Gang of Four, the School of Object-Oriented Programming, SOLID and everything else they always list as a requirement on junior job offers, we’ve been using a repository pattern to isolate the application layer from the actual guts of the system.
+This way get the LI<sup class="footnote-reference" id="fr-2-1"><a href="#fn-2">2</a></sup> of SOLID. What’s more, because we have the application-layer operations split into commands (which may change things) and queries (which may not) we also get to say the system has CQRS<sup class="footnote-reference" id="fr-3-1"><a href="#fn-3">3</a></sup> (and if pressed at an interview we can pontificate on how it’s a natural extension of the Command pattern, which makes verbs into nouns that you can for example write down somewhere and make your source of truth, which you then get to call Event Sourcing - we don’t do that, FYI).</p>
+<p>Unfortunately, one brainless thing I’ve been doing is defining separate concrete implementations of these per-subdomain <code>UserRepository</code>, <code>WorkTicketRepository</code> traits when one concrete <code>DbContext</code> struct could have all of these capabilities - they’re <code>Clone</code>ing and passing around the same damn SeaORM connection pool anyway and all they do is take up space in the <code>State</code> context of our Axum app.</p>
+<blockquote>
+<p><em>Alright, I’ve heard enough. What are you going to do about it?</em></p>
+</blockquote>
+<p>Today we will be fixing the least-involved, least-broken part of the system: the landing page.</p>
+<h2 id="the-landing-page">The landing page</h2>
+<p><img src="https://janligudzinski.github.io/blog/1-nasty-system-1/landing.png" alt="Landing page" /></p>
+<p>Pretty cool, huh? The numbers at the bottom are actually fetched through our API when you visit, so they’re always up to date. This is done server-side, which is why we used SvelteKit here - the other reason was that we needed a minimal way to define some repeatable component templates. We’ve also got a contact form that sends us e-mails if you click the big cyan call-to-action button.</p>
+<p>As I already said, we don’t have CI/CD - this is what we’ll be remedying here today. Fortunately for us, the app is very simple and consists of:</p>
+<ul>
+<li>one container:<pre class="z-code"><code><span class="z-text z-plain">FROM node:current-alpine
+</span><span class="z-text z-plain">
+</span><span class="z-text z-plain">WORKDIR /app
+</span><span class="z-text z-plain">
+</span><span class="z-text z-plain"># Copy package files
+</span><span class="z-text z-plain">COPY package*.json ./
+</span><span class="z-text z-plain">
+</span><span class="z-text z-plain"># Install dependencies
+</span><span class="z-text z-plain">RUN npm ci
+</span><span class="z-text z-plain">
+</span><span class="z-text z-plain"># Copy source code
+</span><span class="z-text z-plain">COPY . .
+</span><span class="z-text z-plain">
+</span><span class="z-text z-plain"># Build the app
+</span><span class="z-text z-plain">RUN npm run build
+</span><span class="z-text z-plain">
+</span><span class="z-text z-plain"># Expose port
+</span><span class="z-text z-plain">EXPOSE 4000
+</span><span class="z-text z-plain">
+</span><span class="z-text z-plain"># Start the app
+</span><span class="z-text z-plain">CMD [&quot;npm&quot;, &quot;run&quot;, &quot;preview&quot;, &quot;--&quot;, &quot;--host&quot;, &quot;0.0.0.0&quot;, &quot;--port&quot;, &quot;4000&quot;]
+</span></code></pre>
+</li>
+<li>one <code>docker-compose</code> template:<pre data-lang="yaml" class="language-yaml z-code"><code class="language-yaml" data-lang="yaml"><span class="z-source z-yaml"><span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">services</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">  <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">element-landing-page</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">build</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-constant z-numeric z-float z-decimal z-yaml"><span class="z-punctuation z-separator z-decimal z-yaml">.</span></span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">ports</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-quoted z-double z-yaml"><span class="z-punctuation z-definition z-string z-begin z-yaml">&quot;</span>4000:4000<span class="z-punctuation z-definition z-string z-end z-yaml">&quot;</span></span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">environment</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-unquoted z-plain z-out z-yaml">NODE_TLS_REJECT_UNAUTHORIZED=0</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-unquoted z-plain z-out z-yaml">NODE_ENV=production</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-unquoted z-plain z-out z-yaml">PORT=4000</span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">restart</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-unquoted z-plain z-out z-yaml">unless-stopped</span>
+</span><span class="z-source z-yaml">    <span class="z-comment z-line z-number-sign z-yaml"><span class="z-punctuation z-definition z-comment z-line z-number-sign z-yaml">#</span> Allow container to access host network for API calls
+</span></span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">extra_hosts</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-quoted z-double z-yaml"><span class="z-punctuation z-definition z-string z-begin z-yaml">&quot;</span>host.docker.internal:host-gateway<span class="z-punctuation z-definition z-string z-end z-yaml">&quot;</span></span>
+</span></code></pre>
+</li>
+<li>one Nginx <code>.conf</code> file:<pre data-lang="nginx" class="language-nginx z-code"><code class="language-nginx" data-lang="nginx"><span class="z-text z-plain">server {
+</span><span class="z-text z-plain">    listen 80;
+</span><span class="z-text z-plain">    listen [::]:80;
+</span><span class="z-text z-plain">    server_name ets-group.pl;
+</span><span class="z-text z-plain">
+</span><span class="z-text z-plain">    location /.well-known/acme-challenge/ {
+</span><span class="z-text z-plain">        root /var/www/certbot;
+</span><span class="z-text z-plain">    }
+</span><span class="z-text z-plain">
+</span><span class="z-text z-plain">    location / {
+</span><span class="z-text z-plain">        return 301 https://$host$request_uri;
+</span><span class="z-text z-plain">    }
+</span><span class="z-text z-plain">}
+</span><span class="z-text z-plain">
+</span><span class="z-text z-plain">server {
+</span><span class="z-text z-plain">    listen 443 ssl;
+</span><span class="z-text z-plain">    listen [::]:443 ssl;
+</span><span class="z-text z-plain">    server_name ets-group.pl;
+</span><span class="z-text z-plain">
+</span><span class="z-text z-plain">    ssl_certificate /etc/letsencrypt/live/ets-group.pl/fullchain.pem;
+</span><span class="z-text z-plain">    ssl_certificate_key /etc/letsencrypt/live/ets-group.pl/privkey.pem;
+</span><span class="z-text z-plain">
+</span><span class="z-text z-plain">    root /var/www/element-landing;
+</span><span class="z-text z-plain">    index index.html;
+</span><span class="z-text z-plain">
+</span><span class="z-text z-plain">    location / {
+</span><span class="z-text z-plain">        proxy_pass http://host.docker.internal:4000;
+</span><span class="z-text z-plain">        proxy_http_version 1.1;
+</span><span class="z-text z-plain">        proxy_set_header Upgrade $http_upgrade;
+</span><span class="z-text z-plain">        proxy_set_header Connection &#39;upgrade&#39;;
+</span><span class="z-text z-plain">        proxy_set_header Host $host;
+</span><span class="z-text z-plain">        proxy_cache_bypass $http_upgrade;
+</span><span class="z-text z-plain">        proxy_set_header X-Real-IP $remote_addr;
+</span><span class="z-text z-plain">        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+</span><span class="z-text z-plain">        proxy_set_header X-Forwarded-Proto $scheme;
+</span><span class="z-text z-plain">    }
+</span><span class="z-text z-plain">}
+</span></code></pre>
+</li>
+</ul>
+<blockquote>
+<p><em>Nice. What now?</em></p>
+</blockquote>
+<h2 id="our-battle-plan">Our battle plan</h2>
+<p>What we want to do is:</p>
+<ul>
+<li>Make the container use an actual production-ready command rather than <code>preview</code>, which does what we need but isn’t exactly best practice</li>
+<li>Set up CI/CD that will push it to a registry so we don’t have to build it on the server</li>
+<li>Get rid of this particular docker-compose file completely</li>
+<li>Find some other way to serve the landing page than Nginx</li>
+</ul>
+<h3 id="1-general-fixes">1: general fixes</h3>
+<p>First things first, let’s edit the Dockerfile to be in accordance with the state of the art and craft. As we have some SSR that requires Node, I’m told we need the Svelte adapter:</p>
+<pre data-lang="bash" class="language-bash z-code"><code class="language-bash" data-lang="bash"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">npm</span></span><span class="z-meta z-function-call z-arguments z-shell"> install<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>save-dev</span> @sveltejs/adapter-node</span>
+</span></code></pre>
+<p>Then use it instead of <code>adapter-auto</code> in <code>svelte.config.js</code>:</p>
+<pre data-lang="javascript" class="language-javascript z-code"><code class="language-javascript" data-lang="javascript"><span class="z-source z-ts"><span class="z-meta z-import z-ts"><span class="z-keyword z-control z-import z-ts">import</span> <span class="z-variable z-other z-readwrite z-alias z-ts">adapter</span> <span class="z-keyword z-control z-from z-ts">from</span> <span class="z-string z-quoted z-single z-ts"><span class="z-punctuation z-definition z-string z-begin z-ts">&#39;</span>@sveltejs/adapter-node<span class="z-punctuation z-definition z-string z-end z-ts">&#39;</span></span></span><span class="z-punctuation z-terminator z-statement z-ts">;</span>
+</span><span class="z-source z-ts">
+</span><span class="z-source z-ts"><span class="z-meta z-export z-default z-ts"><span class="z-keyword z-control z-export z-ts">export</span> <span class="z-keyword z-control z-default z-ts">default</span> <span class="z-meta z-objectliteral z-ts"><span class="z-punctuation z-definition z-block z-ts">{</span>
+</span></span></span><span class="z-source z-ts"><span class="z-meta z-export z-default z-ts"><span class="z-meta z-objectliteral z-ts">  <span class="z-meta z-object z-member z-ts"><span class="z-meta z-object-literal z-key z-ts">kit</span></span><span class="z-meta z-object z-member z-ts"><span class="z-meta z-object-literal z-key z-ts"><span class="z-punctuation z-separator z-key-value z-ts">:</span></span> <span class="z-meta z-objectliteral z-ts"><span class="z-punctuation z-definition z-block z-ts">{</span>
+</span></span></span></span></span><span class="z-source z-ts"><span class="z-meta z-export z-default z-ts"><span class="z-meta z-objectliteral z-ts"><span class="z-meta z-object z-member z-ts"><span class="z-meta z-objectliteral z-ts">    <span class="z-meta z-object z-member z-ts"><span class="z-meta z-object-literal z-key z-ts">adapter</span></span><span class="z-meta z-object z-member z-ts"><span class="z-meta z-object-literal z-key z-ts"><span class="z-punctuation z-separator z-key-value z-ts">:</span></span> <span class="z-meta z-function-call z-ts"><span class="z-entity z-name z-function z-ts">adapter</span></span><span class="z-meta z-brace z-round z-ts">(</span><span class="z-meta z-objectliteral z-ts"><span class="z-punctuation z-definition z-block z-ts">{</span>
+</span></span></span></span></span></span></span><span class="z-source z-ts"><span class="z-meta z-export z-default z-ts"><span class="z-meta z-objectliteral z-ts"><span class="z-meta z-object z-member z-ts"><span class="z-meta z-objectliteral z-ts"><span class="z-meta z-object z-member z-ts"><span class="z-meta z-objectliteral z-ts">      <span class="z-meta z-object z-member z-ts"><span class="z-meta z-object-literal z-key z-ts">out</span></span><span class="z-meta z-object z-member z-ts"><span class="z-meta z-object-literal z-key z-ts"><span class="z-punctuation z-separator z-key-value z-ts">:</span></span> <span class="z-string z-quoted z-single z-ts"><span class="z-punctuation z-definition z-string z-begin z-ts">&#39;</span>build<span class="z-punctuation z-definition z-string z-end z-ts">&#39;</span></span>
+</span></span></span></span></span></span></span></span><span class="z-source z-ts"><span class="z-meta z-export z-default z-ts"><span class="z-meta z-objectliteral z-ts"><span class="z-meta z-object z-member z-ts"><span class="z-meta z-objectliteral z-ts"><span class="z-meta z-object z-member z-ts"><span class="z-meta z-objectliteral z-ts"><span class="z-meta z-object z-member z-ts">    </span><span class="z-punctuation z-definition z-block z-ts">}</span></span><span class="z-meta z-brace z-round z-ts">)</span>
+</span></span></span></span></span></span><span class="z-source z-ts"><span class="z-meta z-export z-default z-ts"><span class="z-meta z-objectliteral z-ts"><span class="z-meta z-object z-member z-ts"><span class="z-meta z-objectliteral z-ts"><span class="z-meta z-object z-member z-ts">  </span><span class="z-punctuation z-definition z-block z-ts">}</span></span>
+</span></span></span></span><span class="z-source z-ts"><span class="z-meta z-export z-default z-ts"><span class="z-meta z-objectliteral z-ts"><span class="z-meta z-object z-member z-ts"></span><span class="z-punctuation z-definition z-block z-ts">}</span></span></span><span class="z-punctuation z-terminator z-statement z-ts">;</span>
+</span></code></pre>
+<p>Now <code>npm run build</code> will produce a <code>build</code> directory and <code>node build</code> will run the generated server. Let’s change the <code>CMD</code> in the Dockerfile to reflect that:</p>
+<pre data-lang="dockerfile" class="language-dockerfile z-code"><code class="language-dockerfile" data-lang="dockerfile"><span class="z-source z-dockerfile"><span class="z-comment z-dockerfile"><span class="z-punctuation z-definition z-comment z-dockerfile">#</span> ... all above as it was...
+</span></span><span class="z-source z-dockerfile"><span class="z-comment z-dockerfile"><span class="z-punctuation z-definition z-comment z-dockerfile">#</span> 4000 was what preview listened to, let&#39;s keep it but the adapter&#39;s server by default listens on 3000
+</span></span><span class="z-source z-dockerfile">ENV PORT=4000
+</span><span class="z-source z-dockerfile"><span class="z-comment z-dockerfile"><span class="z-punctuation z-definition z-comment z-dockerfile">#</span> Expose port
+</span></span><span class="z-source z-dockerfile">EXPOSE 4000
+</span><span class="z-source z-dockerfile">
+</span><span class="z-source z-dockerfile">
+</span><span class="z-source z-dockerfile"><span class="z-comment z-dockerfile"><span class="z-punctuation z-definition z-comment z-dockerfile">#</span> Start the Node server generated by SvelteKit
+</span></span><span class="z-source z-dockerfile">CMD [&quot;node&quot;, &quot;build&quot;]
+</span></code></pre>
+<p>And when we re-run the container and template, it still works:</p>
+<pre data-lang="bash" class="language-bash z-code"><code class="language-bash" data-lang="bash"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">[jan@srogi</span></span><span class="z-meta z-function-call z-arguments z-shell"> element-landing-page]$ http GET localhost:4000</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">HTTP/1.1</span></span><span class="z-meta z-function-call z-arguments z-shell"> 200 OK</span>
+</span><span class="z-source z-shell z-bash"><span class="z-punctuation z-definition z-compound z-begin z-shell">(</span><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">...</span></span><span class="z-meta z-function-call z-arguments z-shell"> actual HTML ...</span><span class="z-punctuation z-definition z-compound z-end z-shell">)</span>
+</span></code></pre>
+<h3 id="2-ci-cd">2: CI/CD</h3>
+<p>I was already working on this before I started writing the post, so I can just copy-paste the Github Actions YAML for the build and push job:</p>
+<pre data-lang="yaml" class="language-yaml z-code"><code class="language-yaml" data-lang="yaml"><span class="z-source z-yaml"><span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">name</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-unquoted z-plain z-out z-yaml">ghcr-push</span>
+</span><span class="z-source z-yaml">
+</span><span class="z-source z-yaml"><span class="z-constant z-language z-boolean z-yaml">on</span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">  <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">push</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">branches</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-meta z-flow-sequence z-yaml"><span class="z-punctuation z-definition z-sequence z-begin z-yaml">[</span><span class="z-string z-quoted z-double z-yaml"><span class="z-punctuation z-definition z-string z-begin z-yaml">&quot;</span>main<span class="z-punctuation z-definition z-string z-end z-yaml">&quot;</span></span><span class="z-punctuation z-definition z-sequence z-end z-yaml">]</span></span>
+</span><span class="z-source z-yaml">  <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">pull_request</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">branches</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-meta z-flow-sequence z-yaml"><span class="z-punctuation z-definition z-sequence z-begin z-yaml">[</span><span class="z-string z-quoted z-double z-yaml"><span class="z-punctuation z-definition z-string z-begin z-yaml">&quot;</span>main<span class="z-punctuation z-definition z-string z-end z-yaml">&quot;</span></span><span class="z-punctuation z-definition z-sequence z-end z-yaml">]</span></span>
+</span><span class="z-source z-yaml">
+</span><span class="z-source z-yaml"><span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">permissions</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">  <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">contents</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-unquoted z-plain z-out z-yaml">read</span>
+</span><span class="z-source z-yaml">  <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">packages</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-unquoted z-plain z-out z-yaml">write</span>
+</span><span class="z-source z-yaml">
+</span><span class="z-source z-yaml"><span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">env</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">  <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">REGISTRY</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-unquoted z-plain z-out z-yaml">ghcr.io</span>
+</span><span class="z-source z-yaml">  <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">IMAGE_NAME</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-unquoted z-plain z-out z-yaml">element-group-com-pl/element-landing-page</span>
+</span><span class="z-source z-yaml">
+</span><span class="z-source z-yaml"><span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">jobs</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">  <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">build</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">runs-on</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-unquoted z-plain z-out z-yaml">ubuntu-latest</span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">steps</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">uses</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-unquoted z-plain z-out z-yaml">actions/checkout@v4</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">uses</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-unquoted z-plain z-out z-yaml">docker/setup-buildx-action@v3</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">uses</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-unquoted z-plain z-out z-yaml">docker/login-action@v3</span>
+</span><span class="z-source z-yaml">        <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">with</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">          <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">registry</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-unquoted z-plain z-out z-yaml">${{ env.REGISTRY }}</span>
+</span><span class="z-source z-yaml">          <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">username</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-unquoted z-plain z-out z-yaml">${{ github.actor }}</span>
+</span><span class="z-source z-yaml">          <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">password</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-unquoted z-plain z-out z-yaml">${{ secrets.GITHUB_TOKEN }}</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">uses</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-unquoted z-plain z-out z-yaml">docker/build-push-action@v6</span>
+</span><span class="z-source z-yaml">        <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">with</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">          <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">context</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-constant z-numeric z-float z-decimal z-yaml"><span class="z-punctuation z-separator z-decimal z-yaml">.</span></span>
+</span><span class="z-source z-yaml">          <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">file</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-unquoted z-plain z-out z-yaml">./Dockerfile</span>
+</span><span class="z-source z-yaml">          <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">push</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-unquoted z-plain z-out z-yaml">${{ github.event_name == &#39;push&#39; &amp;&amp; github.ref == &#39;refs/heads/main&#39; }}</span>
+</span><span class="z-source z-yaml">          <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">tags</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-keyword z-control z-flow z-block-scalar z-literal z-yaml">|</span>
+</span><span class="z-source z-yaml"><span class="z-string z-unquoted z-block z-yaml">            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+</span></span><span class="z-source z-yaml"><span class="z-string z-unquoted z-block z-yaml">            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+</span></span><span class="z-source z-yaml"><span class="z-string z-unquoted z-block z-yaml"></span>          <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">cache-from</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-unquoted z-plain z-out z-yaml">type=gha</span>
+</span><span class="z-source z-yaml">          <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">cache-to</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-unquoted z-plain z-out z-yaml">type=gha,mode=max</span>
+</span><span class="z-source z-yaml">          <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">provenance</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-constant z-language z-boolean z-yaml">false</span>
+</span></code></pre>
+<p>What this does is react to pull requests and pushes to <code>main</code>, build the image, and in the case of a push upload it to a namespace in the registry named after our Github org.</p>
+<p>Not pictured: me naming the file with a comma instead of a period in its name and struggling for an embarrassingly long tiome.</p>
+<p>Also not pictured: me not knowing that when you have a fresh GitHub organization where you placed your repo and have already pushed a package by a given name manually, you first have to set an org-level flag that repository actions are allowed to modify things, <em>then</em> set the same one on the individual repo’s level, <em>then</em> manually push the image from your own machine with a personal access token (the obsolete “classic” kind no less) so the package exists, because otherwise you can’t whitelist the repo as allowed to modify that particular package. If you don’t do this, you’ll get a 403 error on push that will look like you just misconfigured something. Per <a href="https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry#pushing-container-images">Github docs</a>:</p>
+<blockquote>
+<p>The easiest way to connect a repository to a container package is to publish the package from a workflow using <code>${{secrets.GITHUB_TOKEN}}</code>, as the repository that contains the workflow is linked automatically. Note that the <code>GITHUB_TOKEN</code> will not have permission to push the package if you have previously pushed a package to the same namespace, but have not connected the package to the repository.</p>
+</blockquote>
+<h3 id="3-removing-the-dedicated-docker-compose">3: Removing the dedicated docker-compose</h3>
+<p>We don’t really need a full docker-compose for one app. Ideally (relative to this), the whole machine should have just one docker-compose file that defines literally everything running on it, but for today we’ll be satisfied with reducing the count of compose templates from 6 (main app, main app demo, AI app, AI app demo, landing page, reverse proxy) to 5. We’ll do something ugly and fold it into the Nginx one, which over time as we clean more things up and outsource them to the registry rather than building on the spot, will contain more and more of our system.
+First, since we’ve pushed our image to the GHCR, we’re going to ssh onto our machine and log in with a PAT:</p>
+<pre data-lang="bash" class="language-bash z-code"><code class="language-bash" data-lang="bash"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">$</span></span><span class="z-meta z-function-call z-arguments z-shell"> echo <span class="z-meta z-group z-expansion z-parameter z-shell"><span class="z-punctuation z-definition z-variable z-shell">$</span><span class="z-variable z-other z-readwrite z-shell">CR_PAT</span></span></span> <span class="z-keyword z-operator z-logical z-pipe z-shell">|</span> <span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">docker</span></span><span class="z-meta z-function-call z-arguments z-shell"> login ghcr.io<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>u</span> USERNAME<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>password-stdin</span></span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">WARNING!</span></span><span class="z-meta z-function-call z-arguments z-shell"> Your password will be stored unencrypted in /root/.docker/config.json.</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">Configure</span></span><span class="z-meta z-function-call z-arguments z-shell"> a credential helper to remove this warning. See</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">https://docs.docker.com/engine/reference/commandline/login/#credential-stores</span></span>
+</span><span class="z-source z-shell z-bash">
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">Login</span></span><span class="z-meta z-function-call z-arguments z-shell"> Succeeded</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">$</span></span><span class="z-meta z-function-call z-arguments z-shell"> docker pull ghcr.io/element-group-com-pl/element-landing-page</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">Using</span></span><span class="z-meta z-function-call z-arguments z-shell"> default tag: latest</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">latest:</span></span><span class="z-meta z-function-call z-arguments z-shell"> Pulling from element-group-com-pl/element-landing-page</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">2d35ebdb57d9:</span></span><span class="z-meta z-function-call z-arguments z-shell"> Pull complete</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">9d523be8e709:</span></span><span class="z-meta z-function-call z-arguments z-shell"> Pull complete</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">7d809136e3e8:</span></span><span class="z-meta z-function-call z-arguments z-shell"> Pull complete</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">ddaa38e0ffb2:</span></span><span class="z-meta z-function-call z-arguments z-shell"> Pull complete</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">6e7b480dd868:</span></span><span class="z-meta z-function-call z-arguments z-shell"> Pull complete</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">80e4cb152b36:</span></span><span class="z-meta z-function-call z-arguments z-shell"> Pull complete</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">e63fe1dda577:</span></span><span class="z-meta z-function-call z-arguments z-shell"> Pull complete</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">bf3a568cc0b6:</span></span><span class="z-meta z-function-call z-arguments z-shell"> Pull complete</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">9e0c240541c7:</span></span><span class="z-meta z-function-call z-arguments z-shell"> Pull complete</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">Digest:</span></span><span class="z-meta z-function-call z-arguments z-shell"> sha256:083f0728600db5aefa5b63007789f7acdee38bdc99fd1c3644d76be048c28b54</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">Status:</span></span><span class="z-meta z-function-call z-arguments z-shell"> Downloaded newer image for ghcr.io/element-group-com-pl/element-landing-page:latest</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">ghcr.io/element-group-com-pl/element-landing-page:latest</span></span>
+</span></code></pre>
+<blockquote>
+<p><em>What about the unencrypted token it warned you about?</em></p>
+</blockquote>
+<p>I’m not stressed about it. One, if someone gets my SSH key and can read that file on my machine, I have way bigger problems, two, I can just revoke it, three, it can’t do anything but pull:</p>
+<p><img src="https://janligudzinski.github.io/blog/1-nasty-system-1/token.png" alt="Pull-only token settings" /></p>
+<p>Now it’s just a question of shutting down the old container, removing it:</p>
+<pre class="z-code"><code><span class="z-text z-plain">docker-compose down
+</span><span class="z-text z-plain">cd ..
+</span><span class="z-text z-plain">rm -r element-landing-page
+</span></code></pre>
+<p>Going into our nginx compose directory, and editing the <code>docker-compose.yml</code> to add our landing page service:</p>
+<pre data-lang="yaml" class="language-yaml z-code"><code class="language-yaml" data-lang="yaml"><span class="z-source z-yaml"><span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">version</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-quoted z-single z-yaml"><span class="z-punctuation z-definition z-string z-begin z-yaml">&#39;</span>3<span class="z-punctuation z-definition z-string z-end z-yaml">&#39;</span></span>
+</span><span class="z-source z-yaml">
+</span><span class="z-source z-yaml"><span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">services</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">  <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">landing-page</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">image</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-unquoted z-plain z-out z-yaml">ghcr.io/element-group-com-pl/element-landing-page:latest</span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">pull_policy</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-unquoted z-plain z-out z-yaml">always</span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">environment</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-unquoted z-plain z-out z-yaml">NODE_ENV=production</span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">extra_hosts</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-quoted z-double z-yaml"><span class="z-punctuation z-definition z-string z-begin z-yaml">&quot;</span>host.docker.internal:host-gateway<span class="z-punctuation z-definition z-string z-end z-yaml">&quot;</span></span> <span class="z-comment z-line z-number-sign z-yaml"><span class="z-punctuation z-definition z-comment z-line z-number-sign z-yaml">#</span> this is so we can access the API on the same machine; the canonical solution we&#39;ll use eventually is putting both in the same docker-compose network
+</span></span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">ports</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-quoted z-double z-yaml"><span class="z-punctuation z-definition z-string z-begin z-yaml">&quot;</span>4000:4000<span class="z-punctuation z-definition z-string z-end z-yaml">&quot;</span></span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">restart</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-unquoted z-plain z-out z-yaml">unless-stopped</span>
+</span><span class="z-source z-yaml">
+</span><span class="z-source z-yaml">  <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">nginx</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">image</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-unquoted z-plain z-out z-yaml">nginx:alpine</span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">ports</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-quoted z-double z-yaml"><span class="z-punctuation z-definition z-string z-begin z-yaml">&quot;</span>80:80<span class="z-punctuation z-definition z-string z-end z-yaml">&quot;</span></span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-quoted z-double z-yaml"><span class="z-punctuation z-definition z-string z-begin z-yaml">&quot;</span>443:443<span class="z-punctuation z-definition z-string z-end z-yaml">&quot;</span></span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">volumes</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-unquoted z-plain z-out z-yaml">./nginx/conf.d:/etc/nginx/conf.d</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-unquoted z-plain z-out z-yaml">./nginx/certs:/etc/nginx/certs</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-unquoted z-plain z-out z-yaml">./certbot/www:/var/www/certbot</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-unquoted z-plain z-out z-yaml">./certbot/conf:/etc/letsencrypt</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-unquoted z-plain z-out z-yaml">/var/www/element-landing:/var/www/element-landing:ro</span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">restart</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-unquoted z-plain z-out z-yaml">unless-stopped</span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">extra_hosts</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-quoted z-double z-yaml"><span class="z-punctuation z-definition z-string z-begin z-yaml">&quot;</span>host.docker.internal:host-gateway<span class="z-punctuation z-definition z-string z-end z-yaml">&quot;</span></span>
+</span><span class="z-source z-yaml">
+</span><span class="z-source z-yaml">  <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">certbot</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">image</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-unquoted z-plain z-out z-yaml">certbot/certbot</span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">volumes</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-unquoted z-plain z-out z-yaml">./certbot/www:/var/www/certbot</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-unquoted z-plain z-out z-yaml">./certbot/conf:/etc/letsencrypt</span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">depends_on</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-unquoted z-plain z-out z-yaml">nginx</span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">entrypoint</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-quoted z-double z-yaml"><span class="z-punctuation z-definition z-string z-begin z-yaml">&quot;</span>/bin/sh -c &#39;trap exit TERM; while :; do certbot renew; sleep 12h &amp; wait $${!}; done;&#39;<span class="z-punctuation z-definition z-string z-end z-yaml">&quot;</span></span>
+</span></code></pre>
+<p>And because we already have a <code>.conf</code> file for this service in place, reverse-proxying our main domain to port 4000, all we need is a <code>docker compose up -d</code> to run the new setup.</p>
+<h3 id="4-let-s-yeet-nginx-completely">4: Let’s yeet Nginx completely!</h3>
+<p>Let me remind you how our reverse-proxying works:</p>
+<ul>
+<li>there’s a <code>certbot</code> image that, when it runs, does the thing with Let’s Encrypt that gets us certs for each subdomain we have</li>
+<li>there’s an <code>nginx</code> image that actually serves our stuff</li>
+<li>nginx config files and certbot certs are exposed to both images as volumes from our local filesystem on the machine so we can edit nginx’s configs and nginx can read certbot’s outputs</li>
+<li>whenever we want to add a subdomain for a new service, we do some black magic with restarting both of those in a particular order, and there might also be some <code>docker run</code> involved with one-off commands, and my brain has blocked out the no doubt traumatic memory</li>
+</ul>
+<p>This is probably salvageable - we could maybe make some custom script or docker image that bundles certbot and nginx together and automatically reacts to changes in config files and whatnot - but I just found out recently about a way simpler alternative to maintaining this hierarchy of volumes and <code>.conf</code> files. It’s called <a href="https://caddyserver.com/">Caddy</a>, and it promises to Just Work (TM) with per-domain SSL and have config files as simple as this:</p>
+<pre class="z-code"><code><span class="z-text z-plain">api.ets-group.pl {
+</span><span class="z-text z-plain">    tls internal # (this line is actually implicit)
+</span><span class="z-text z-plain">    reverse_proxy localhost:3000
+</span><span class="z-text z-plain">}
+</span><span class="z-text z-plain">web.ets-group.pl {
+</span><span class="z-text z-plain">    tls internal
+</span><span class="z-text z-plain">    reverse_proxy localhost:5000
+</span><span class="z-text z-plain">}
+</span></code></pre>
+<p>Going back to our plan to eliminate all docker-composes but one, to that end we’ll start a new repo, let’s call it <code>element-iac</code> as ultimately we have bigger ambitions to make this a whole infrastructure-as-code thing: maybe spawn the whole machine with Terraform, etc, etc.</p>
+<p>Let’s go over the nginx <code>.conf</code> files to see what ports we use on our machine and for which domain and app:</p>
+<pre class="z-code"><code><span class="z-text z-plain">3000 - main app&#39;s API, api.ets-group.pl
+</span><span class="z-text z-plain">3003 - same, but demo env, api-demo.ets-group.pl
+</span><span class="z-text z-plain">4200, 4201 - frontends, web. and web-demo. subdomains
+</span><span class="z-text z-plain">4000 - as we know, landing page; top-level domain
+</span><span class="z-text z-plain">5100, 5099 - AI app and its demo version, call. and call-demo.
+</span></code></pre>
+<p>There’s also a redirect from element-group.com.pl to ets-group.pl. Let’s see what GPT has to say about what the Caddyfile and docker-compose should look like:</p>
+<pre class="z-code"><code><span class="z-text z-plain">{
+</span><span class="z-text z-plain">	# Use your email for ACME/Let&#39;s Encrypt
+</span><span class="z-text z-plain">	email {$ACME_EMAIL}
+</span><span class="z-text z-plain">}
+</span><span class="z-text z-plain">api.ets-group.pl {
+</span><span class="z-text z-plain">	reverse_proxy http://host.docker.internal:3000
+</span><span class="z-text z-plain">}
+</span><span class="z-text z-plain">api-demo.ets-group.pl {
+</span><span class="z-text z-plain">	reverse_proxy http://host.docker.internal:3003
+</span><span class="z-text z-plain">}
+</span><span class="z-text z-plain">web.ets-group.pl {
+</span><span class="z-text z-plain">	reverse_proxy http://host.docker.internal:4200
+</span><span class="z-text z-plain">}
+</span><span class="z-text z-plain">web-demo.ets-group.pl {
+</span><span class="z-text z-plain">	reverse_proxy http://host.docker.internal:4201
+</span><span class="z-text z-plain">}
+</span><span class="z-text z-plain">ets-group.pl {
+</span><span class="z-text z-plain">	reverse_proxy http://host.docker.internal:4000
+</span><span class="z-text z-plain">}
+</span><span class="z-text z-plain">call.ets-group.pl {
+</span><span class="z-text z-plain">	reverse_proxy http://host.docker.internal:5100
+</span><span class="z-text z-plain">}
+</span><span class="z-text z-plain">call-demo.ets-group.pl {
+</span><span class="z-text z-plain">	reverse_proxy http://host.docker.internal:5099
+</span><span class="z-text z-plain">}
+</span><span class="z-text z-plain">element-group.com.pl {
+</span><span class="z-text z-plain">	redir https://ets-group.pl{uri} 308
+</span><span class="z-text z-plain">}
+</span></code></pre>
+<pre data-lang="yaml" class="language-yaml z-code"><code class="language-yaml" data-lang="yaml"><span class="z-source z-yaml"><span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">version</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-quoted z-double z-yaml"><span class="z-punctuation z-definition z-string z-begin z-yaml">&quot;</span>3.9<span class="z-punctuation z-definition z-string z-end z-yaml">&quot;</span></span>
+</span><span class="z-source z-yaml">
+</span><span class="z-source z-yaml"><span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">services</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">  <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">caddy</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">image</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-unquoted z-plain z-out z-yaml">caddy:2</span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">restart</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-unquoted z-plain z-out z-yaml">unless-stopped</span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">ports</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-quoted z-double z-yaml"><span class="z-punctuation z-definition z-string z-begin z-yaml">&quot;</span>80:80<span class="z-punctuation z-definition z-string z-end z-yaml">&quot;</span></span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-quoted z-double z-yaml"><span class="z-punctuation z-definition z-string z-begin z-yaml">&quot;</span>443:443<span class="z-punctuation z-definition z-string z-end z-yaml">&quot;</span></span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">env_file</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-unquoted z-plain z-out z-yaml">.env</span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">volumes</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-unquoted z-plain z-out z-yaml">./Caddyfile:/etc/caddy/Caddyfile:ro</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-unquoted z-plain z-out z-yaml">caddy-data:/data</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-unquoted z-plain z-out z-yaml">caddy-config:/config</span>
+</span><span class="z-source z-yaml">    <span class="z-comment z-line z-number-sign z-yaml"><span class="z-punctuation z-definition z-comment z-line z-number-sign z-yaml">#</span> Make host.docker.internal work on Linux (and everywhere)
+</span></span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">extra_hosts</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-quoted z-double z-yaml"><span class="z-punctuation z-definition z-string z-begin z-yaml">&quot;</span>host.docker.internal:host-gateway<span class="z-punctuation z-definition z-string z-end z-yaml">&quot;</span></span>
+</span><span class="z-source z-yaml">
+</span><span class="z-source z-yaml"><span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">volumes</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">  <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">caddy-data</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">  <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">caddy-config</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span></code></pre>
+<p>We will also copy-paste the service block for our landing page, since we’ll be decommissioning the Nginx compose that runs that:</p>
+<pre data-lang="yaml" class="language-yaml z-code"><code class="language-yaml" data-lang="yaml"><span class="z-source z-yaml"><span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">landing-page</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">image</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-unquoted z-plain z-out z-yaml">ghcr.io/element-group-com-pl/element-landing-page:latest</span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">pull_policy</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-unquoted z-plain z-out z-yaml">always</span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">environment</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-unquoted z-plain z-out z-yaml">NODE_ENV=production</span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">extra_hosts</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-quoted z-double z-yaml"><span class="z-punctuation z-definition z-string z-begin z-yaml">&quot;</span>host.docker.internal:host-gateway<span class="z-punctuation z-definition z-string z-end z-yaml">&quot;</span></span> <span class="z-comment z-line z-number-sign z-yaml"><span class="z-punctuation z-definition z-comment z-line z-number-sign z-yaml">#</span> this is so we can access the API on the same machine; the canonical solution we&#39;ll use eventually is putting both in the same docker-compose network
+</span></span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">ports</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-quoted z-double z-yaml"><span class="z-punctuation z-definition z-string z-begin z-yaml">&quot;</span>4000:4000<span class="z-punctuation z-definition z-string z-end z-yaml">&quot;</span></span>
+</span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">restart</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span> <span class="z-string z-unquoted z-plain z-out z-yaml">unless-stopped</span>
+</span></code></pre>
+<blockquote>
+<p><em>Hold on, why write the whole <code>host.docker.internal</code> thing? Isn’t that kind of against the idea of Compose?</em></p>
+</blockquote>
+<p>Good catch and you’re right - we ended up doing this ugly hack because we have a bunch of separate docker-compose files that don’t share networks or really know about each other. Since we’re moving toward a unified file for the whole machine, we can make the first step to phasing this out by putting <code>landing-page</code> and <code>caddy</code> in the same network:</p>
+<pre data-lang="yaml" class="language-yaml z-code"><code class="language-yaml" data-lang="yaml"><span class="z-source z-yaml"><span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">networks</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">  <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">webnet</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml"><span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">services</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">  <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">landing-page</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">    <span class="z-comment z-line z-number-sign z-yaml"><span class="z-punctuation z-definition z-comment z-line z-number-sign z-yaml">#</span> ... all above as it was
+</span></span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">networks</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-unquoted z-plain z-out z-yaml">webnet</span>
+</span><span class="z-source z-yaml">  <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">caddy</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">    <span class="z-comment z-line z-number-sign z-yaml"><span class="z-punctuation z-definition z-comment z-line z-number-sign z-yaml">#</span> ... ditto
+</span></span><span class="z-source z-yaml">    <span class="z-string z-unquoted z-plain z-out z-yaml"><span class="z-entity z-name z-tag z-yaml">networks</span></span><span class="z-punctuation z-separator z-key-value z-mapping z-yaml">:</span>
+</span><span class="z-source z-yaml">      <span class="z-punctuation z-definition z-block z-sequence z-item z-yaml">-</span> <span class="z-string z-unquoted z-plain z-out z-yaml">webnet</span>
+</span><span class="z-source z-yaml"><span class="z-comment z-line z-number-sign z-yaml"><span class="z-punctuation z-definition z-comment z-line z-number-sign z-yaml">#</span>
+</span></span></code></pre>
+<p>And so in our Caddyfile we’ll be able to refer to that container as just <code>landing-page</code>:</p>
+<pre class="z-code"><code><span class="z-text z-plain">ets-group.pl {
+</span><span class="z-text z-plain">	reverse_proxy http://landing-page:4000
+</span><span class="z-text z-plain">}
+</span></code></pre>
+<p>Push that onto the host, quickly <code>docker-compose stop</code> the nginx setup, <code>docker-compose up -d</code> the new Caddy one, and we’re done.</p>
+<blockquote>
+<p><em>What about actual CD? Like having this top-level Caddy compose pull new versions of the upstream images when they change or restart when the template does?</em></p>
+</blockquote>
+<p>Good question. We’ll get to that later (TM). For now, let’s just be happy that we can scrap Nginx and Certbot (after pulling the files to our local box just in case of course):</p>
+<pre class="z-code"><code><span class="z-text z-plain">root@ubuntu-8gb-fsn1-1:~/docker-nginx# docker-compose down
+</span><span class="z-text z-plain">Removing docker-nginx_landing-page_1 ... done
+</span><span class="z-text z-plain">Removing docker-nginx_certbot_1      ... done
+</span><span class="z-text z-plain">Removing docker-nginx_nginx_1        ... done
+</span><span class="z-text z-plain">Removing network docker-nginx_default
+</span><span class="z-text z-plain">root@ubuntu-8gb-fsn1-1:~/docker-nginx# cd ..
+</span><span class="z-text z-plain">root@ubuntu-8gb-fsn1-1:~# rm -r docker-nginx
+</span><span class="z-text z-plain">root@ubuntu-8gb-fsn1-1:~# ls
+</span><span class="z-text z-plain">goldenhand-golem  goldenhand-rs  goldenhand-rs-demo  main-machine
+</span></code></pre>
+<p>Correction to an earlier statement now that I look at this: by the time I implemented <code>golem</code> (the AI system’s internal codename), I’d gotten smart enough to make one compose for both the prod and demo containers, so the total number of composes was 5, not 6 (and now it’s 4).</p>
+<h2 id="conclusion">Conclusion</h2>
+<p>I’ve shown you the tip of the nasty iceberg and how I shaved off just a bit of that ice. Next up, we’ll be setting up CI for more of our containers and folding more of our docker-compose files into the one main one.</p>
+<section class="footnotes">
+<ol class="footnotes-list">
+<li id="fn-1">
+<p>I can’t overstate how harmful I consider Blazor. It might be bearable (for the dev; I think the bundle can weigh tens of megabytes for the user to download) in WASM mode, but everything coming in a binary protocol over a single Websocket means you get absolutely zero useful information in your browser’s devtools, so prepare to wait ages for the VS debugger to hit your breakpoint everytime an <code>HttpClient</code> hits your actual API. And then maybe another breakpoint in the VS window with the API. Also, if you need to ship a big non-static file to the browser for whatever reason, the real fun begins, because you are <em>not</em> going to fit it in one piece over that connection without crashing it. <a href="#fr-1-1">↩</a></p>
+</li>
+<li id="fn-2">
+<p>Liskov’s Substitution Principle (you can expect any concrete implementation of a contract to be interchangeable with any others - not that I’ve ever seen anyone actually have two competing concrete implementations of a database layer in one end app) and the Interface Segregation Principle (abstract interfaces should only define operations they need to define, which kind of follows from the S - Single Responsibility Principle - but the I makes a neater mnemonic that people like the sound of) <a href="#fr-2-1">↩</a></p>
+</li>
+<li id="fn-3">
+<p>“Command/query responsibility segregation” <a href="#fr-3-1">↩</a></p>
+</li>
+</ol>
+</section>
+
+</article>
+		
+	<span id="search-index" class="hidden">https://janligudzinski.github.io/search_index.en.json</span>
+	<span id="more-matches-text" class="hidden">$MATCHES more matches</span>
+
+	</main>
+	<footer id="site-footer">
+</footer>
+
+
+</body>
+</html>

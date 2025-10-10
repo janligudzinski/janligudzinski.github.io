@@ -1,4 +1,4 @@
-# GitHub Actions workflow to build Zola site and deploy to GitHub Pages
+# Build and deploy Zola site to GitHub Pages via official Pages actions (artifact + deploy-pages)
 
 name: Build and Deploy Zola Site
 
@@ -8,21 +8,28 @@ on:
       - master
   workflow_dispatch:
 
+# Required permissions for GitHub Pages
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
+
+# Ensure only one deployment runs at a time
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
 
 jobs:
-  build-deploy:
+  build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Pull Zola Docker image
-        run: docker pull ghcr.io/getzola/zola:v0.21.0
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
 
       - name: Build Zola site using Docker
         run: |
@@ -32,12 +39,18 @@ jobs:
             ghcr.io/getzola/zola:v0.21.0 \
             build
 
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./public
-          # Uncomment the following line if you want to keep the history of deployments
-          # keep_files: true
-          # Uncomment and set a custom domain if needed
-          # cname: janligudzinski.com
+          path: ./public
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -29,7 +29,7 @@ As for what the software we've built and deployed looks like, it goes like this:
 - Core app frontend: Angular with Bulma (Bootstrap is passé and I didn't want to come up with Tailwind styles for everything myself)
 - AI app backend: Axum again (the quick and dirty prototype was in C#)
 - All three of the above exist in two copies, one for the production environment and one for demos
-- Mostly static landing page (unfucking which will be done in this post), done in Sveltekit.
+- Mostly static landing page ("unfucking" which will be done in this post), done in Sveltekit.
 - All of this is exposed to the outside world with different subdomains by an instance of Nginx with Certbot.
 
 >*Why Angular and not React or Svelte?*
@@ -149,7 +149,7 @@ As I already said, we don't have CI/CD - this is what we'll be remedying here to
         - "host.docker.internal:host-gateway"
   ```
 - one Nginx `.conf` file:
-  ```ngin
+  ```nginx
   server {
       listen 80;
       listen [::]:80;

@@ -1,10 +1,10 @@
 +++
 authors = ["Jan Ligudziński"]
-title = "In which I solo-unfuck a production system: #1 - Landing page"
+title = "In which I fix a nasty production system: #1 - Landing page"
 description = "If only you knew how bad things really are."
 date = 2025-10-09
 [taxonomies]
-tags = ["ETS Unfuck Series", "programming", "rust", "devops", "war story"]
+tags = ["nasty system", "programming", "rust", "devops", "docker", "compose", "war story"]
 +++
 
 ## Intro
@@ -29,7 +29,7 @@ As for what the software we've built and deployed looks like, it goes like this:
 - Core app frontend: Angular with Bulma (Bootstrap is passé and I didn't want to come up with Tailwind styles for everything myself)
 - AI app backend: Axum again (the quick and dirty prototype was in C#)
 - All three of the above exist in two copies, one for the production environment and one for demos
-- Mostly static landing page ("unfucking" which will be done in this post), done in Sveltekit.
+- Mostly static landing page (unfucking which will be done in this post), done in Sveltekit.
 - All of this is exposed to the outside world with different subdomains by an instance of Nginx with Certbot.
 
 >*Why Angular and not React or Svelte?*
@@ -532,6 +532,8 @@ root@ubuntu-8gb-fsn1-1:~# rm -r docker-nginx
 root@ubuntu-8gb-fsn1-1:~# ls
 goldenhand-golem  goldenhand-rs  goldenhand-rs-demo  main-machine
 ```
+
+Correction to an earlier statement now that I look at this: by the time I implemented `golem` (the AI system's internal codename), I'd gotten smart enough to make one compose for both the prod and demo containers, so the total number of composes was 5, not 6 (and now it's 4).
 
 ## Conclusion
 

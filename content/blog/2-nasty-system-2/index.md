@@ -2,7 +2,7 @@
 authors = ["Jan Ligudziński"]
 title = "In which I fix a nasty production system: #2 - More CI and Docker Compose cleanup"
 description = "We might be getting somewhere."
-date = 2025-10-10
+date = 2025-10-11
 [taxonomies]
 tags = ["nasty system", "programming", "rust", "devops", "docker", "compose", "war story"]
 +++

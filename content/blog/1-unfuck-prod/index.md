@@ -380,13 +380,163 @@ services:
     entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
 ```
 
-And because we already have a `.conf` file for this service in place, reverse-proxying our main domain to port 4000, all we need is a `docker compose up-d` to run the new setup.
+And because we already have a `.conf` file for this service in place, reverse-proxying our main domain to port 4000, all we need is a `docker compose up -d` to run the new setup.
 
 ### 4: Let's yeet Nginx completely!
 
 Let me remind you how our reverse-proxying works:
+- there's a `certbot` image that, when it runs, does the thing with Let's Encrypt that gets us certs for each subdomain we have
+- there's an `nginx` image that actually serves our stuff
+- nginx config files and certbot certs are exposed to both images as volumes from our local filesystem on the machine so we can edit nginx's configs and nginx can read certbot's outputs
+- whenever we want to add a subdomain for a new service, we do some black magic with restarting both of those in a particular order, and there might also be some `docker run` involved with one-off commands, and my brain has blocked out the no doubt traumatic memory
 
+This is probably salvageable - we could maybe make some custom script or docker image that bundles certbot and nginx together and automatically reacts to changes in config files and whatnot - but I just found out recently about a way simpler alternative to maintaining this hierarchy of volumes and `.conf` files. It's called [Caddy](https://caddyserver.com/), and it promises to Just Work (TM) with per-domain SSL and have config files as simple as this:
 
-[^1]: I don't have the words to express how much I hate that particular framework. It might be bearable in WASM mode, but everything coming in a binary protocol over a single Websocket means you get absolutely zero useful information in your browser's devtools, so prepare to wait ages for the VS debugger to hit your breakpoint everytime an `HttpClient` hits your actual API. And then maybe another breakpoint in the VS window with the API. Also, if you need to ship a big non-static file to the browser for whatever reason, the real fun begins, because you are *not* going to fit it in one piece over that connection without crashing it.
+```
+api.ets-group.pl {
+    tls internal # (this line is actually implicit)
+    reverse_proxy localhost:3000
+}
+web.ets-group.pl {
+    tls internal
+    reverse_proxy localhost:5000
+}
+```
+
+Going back to our plan to eliminate all docker-composes but one, to that end we'll start a new repo, let's call it `element-iac` as ultimately we have bigger ambitions to make this a whole infrastructure-as-code thing: maybe spawn the whole machine with Terraform, etc, etc.
+
+Let's go over the nginx `.conf` files to see what ports we use on our machine and for which domain and app:
+
+```
+3000 - main app's API, api.ets-group.pl
+3003 - same, but demo env, api-demo.ets-group.pl
+4200, 4201 - frontends, web. and web-demo. subdomains
+4000 - as we know, landing page; top-level domain
+5100, 5099 - AI app and its demo version, call. and call-demo.
+```
+
+There's also a redirect from element-group.com.pl to ets-group.pl. Let's see what GPT has to say about what the Caddyfile and docker-compose should look like:
+
+```
+{
+	# Use your email for ACME/Let's Encrypt
+	email {$ACME_EMAIL}
+}
+api.ets-group.pl {
+	reverse_proxy http://host.docker.internal:3000
+}
+api-demo.ets-group.pl {
+	reverse_proxy http://host.docker.internal:3003
+}
+web.ets-group.pl {
+	reverse_proxy http://host.docker.internal:4200
+}
+web-demo.ets-group.pl {
+	reverse_proxy http://host.docker.internal:4201
+}
+ets-group.pl {
+	reverse_proxy http://host.docker.internal:4000
+}
+call.ets-group.pl {
+	reverse_proxy http://host.docker.internal:5100
+}
+call-demo.ets-group.pl {
+	reverse_proxy http://host.docker.internal:5099
+}
+element-group.com.pl {
+	redir https://ets-group.pl{uri} 308
+}
+```
+
+```yaml
+version: "3.9"
+
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file:
+      - .env
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    # Make host.docker.internal work on Linux (and everywhere)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  caddy-data:
+  caddy-config:
+```
+
+We will also copy-paste the service block for our landing page, since we'll be decommissioning the Nginx compose that runs that:
+
+```yaml
+landing-page:
+    image: ghcr.io/element-group-com-pl/element-landing-page:latest
+    pull_policy: always
+    environment:
+      - NODE_ENV=production
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # this is so we can access the API on the same machine; the canonical solution we'll use eventually is putting both in the same docker-compose network
+    ports:
+      - "4000:4000"
+    restart: unless-stopped
+```
+
+>*Hold on, why write the whole `host.docker.internal` thing? Isn't that kind of against the idea of Compose?*
+
+Good catch and you're right - we ended up doing this ugly hack because we have a bunch of separate docker-compose files that don't share networks or really know about each other. Since we're moving toward a unified file for the whole machine, we can make the first step to phasing this out by putting `landing-page` and `caddy` in the same network:
+
+```yaml
+networks:
+  webnet:
+services:
+  landing-page:
+    # ... all above as it was
+    networks:
+      - webnet
+  caddy:
+    # ... ditto
+    networks:
+      - webnet
+#
+```
+
+And so in our Caddyfile we'll be able to refer to that container as just `landing-page`:
+
+```
+ets-group.pl {
+	reverse_proxy http://landing-page:4000
+}
+```
+
+Push that onto the host, quickly `docker-compose stop` the nginx setup, `docker-compose up -d` the new Caddy one, and we're done.
+
+>*What about actual CD? Like having this top-level Caddy compose pull new versions of the upstream images when they change or restart when the template does?*
+
+Good question. We'll get to that later (TM). For now, let's just be happy that we can scrap Nginx and Certbot (after pulling the files to our local box just in case of course):
+
+```
+root@ubuntu-8gb-fsn1-1:~/docker-nginx# docker-compose down
+Removing docker-nginx_landing-page_1 ... done
+Removing docker-nginx_certbot_1      ... done
+Removing docker-nginx_nginx_1        ... done
+Removing network docker-nginx_default
+root@ubuntu-8gb-fsn1-1:~/docker-nginx# cd ..
+root@ubuntu-8gb-fsn1-1:~# rm -r docker-nginx
+root@ubuntu-8gb-fsn1-1:~# ls
+goldenhand-golem  goldenhand-rs  goldenhand-rs-demo  main-machine
+```
+
+## Conclusion
+
+I've shown you the tip of the nasty iceberg and how I shaved off just a bit of that ice. Next up, we'll be setting up CI for more of our containers and folding more of our docker-compose files into the one main one.
+
+[^1]: I can't overstate how harmful I consider Blazor. It might be bearable (for the dev; I think the bundle can weigh tens of megabytes for the user to download) in WASM mode, but everything coming in a binary protocol over a single Websocket means you get absolutely zero useful information in your browser's devtools, so prepare to wait ages for the VS debugger to hit your breakpoint everytime an `HttpClient` hits your actual API. And then maybe another breakpoint in the VS window with the API. Also, if you need to ship a big non-static file to the browser for whatever reason, the real fun begins, because you are *not* going to fit it in one piece over that connection without crashing it.
 [^2]: Liskov's Substitution Principle (you can expect any concrete implementation of a contract to be interchangeable with any others - not that I've ever seen anyone actually have two competing concrete implementations of a database layer in one end app) and the Interface Segregation Principle (abstract interfaces should only define operations they need to define, which kind of follows from the S - Single Responsibility Principle - but the I makes a neater mnemonic that people like the sound of)
 [^3]: "Command/query responsibility segregation"

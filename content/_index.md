@@ -5,7 +5,7 @@ title = "Home"
 
 # Jan Ligudziński
 
-Hi, I'm Jan Ligudziński. I build programs for computers and have them run on other computers to make a living. I mostly do this in C# and Rust, but I can also do Python, Angular and React frontends, and set up whole stacks with databases (mostly MSSQL and Postgres), Docker containers, other fancy buzzwords and everything. Most of my cloud experience is with Azure, but I also do AWS and Hetzner.
+Hi, I'm Jan Ligudziński. I build programs on my computer and have them run on other computers to make a living. I mostly do this in C# and Rust, but I can also do Python, Angular and React frontends, and set up whole stacks with databases (mostly MSSQL and Postgres), Docker containers, other fancy buzzwords and everything. Most of my cloud experience is with Azure, but I also do AWS and Hetzner.
 
 I also write about the things I program.
 

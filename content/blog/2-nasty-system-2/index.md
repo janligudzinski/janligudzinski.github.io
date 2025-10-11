@@ -1,7 +1,7 @@
 +++
 authors = ["Jan Ligudziński"]
 title = "In which I fix a nasty production system: #2 - More CI and Docker Compose cleanup"
-description = "We might be getting somewhere."
+description = "Lots of me vs. GitHub combat"
 date = 2025-10-11
 [taxonomies]
 tags = ["nasty system", "programming", "rust", "devops", "docker", "compose", "war story"]
@@ -270,6 +270,350 @@ goldenhand-rs  goldenhand-rs-demo  main-machine
 
 One down, two to go. Next up: the main web app.
 
+## GoldenHand
 
-[^1]: Behind the scenes: Traefik was also a possible solution, since it's apparently tailor-made for our use case of routing to multiple Docker containers, but Caddy's easy one-file config won out. Also, I can see a way I could use it locally for development when I need HTTPS for something (currently, we have a compile-time switch that makes the API serve over HTTPS in development; outsourcing that concern to Caddy would mean we get to delete code, which is what every developer loves most).
-[^2]: The early prototype I'd built in C# before the Realtime API had even dropped functioned purely over multiple HTTP requests where Twilio would call a "start_call" endpoint and we'd respond with a TwiML `<Gather>` asking it to collect user audio and give us a text transcription at another endpoint, "advance_conversation", which then responded with a `<Say>` containing the LLM's response and another `<Gather>` asking to do the same thing again. In between the different requests we'd store the conversation state in Redis. Currently, as the conversation is a persistent connection, we can do this stuff in memory (and as the LLM can use tools like "hang up", we also don't need to do hacky things like asking the LLM to output a blob of everything-JSON containing its next sentence, a "conversation should end" flag, etc).
+I named our main web app that after the Polish idiom "złota rączka", "golden \[little\] hand" for a handyman or any dude who can fix things, when in the early design stages I was under the impression our app was going to be something like Uber for small repairs with the end user being individual tenants. It's stuck around and no one has raised any objections to it. Anyway, our job with overhauling this repo will be slightly more complicated. As I've already said, it's a monorepo of two projects that compile down to two Docker containers - a separate backend API and a frontend SPA. What's more, the original docker-compose everything started from also originated in this repo, and it's what defines the database and Redis cache containers, so after we figure out how to do proper CI and image pushing for the apps themselves, we'll have to figure out some way to safely exfiltrate the database so it's not gone when we nuke the old compose and source directories.
+
+### Planning
+
+Before we do anything else, we need to find a way to automatically deploy both the backend and the frontend. Considering the differences in build times and the fact that they're different containers in the compose, the sane approach would be to build and push them separately.
+
+>*Considering that this is a monorepo and the backend and frontend seem pretty tightly coupled, why not just build and push both in one CI step? Or even build and have one container that serves both the API and the GUI?*
+
+Good question. From where we're standing right now, I can see a bad scenario where compiling and deploying the backend takes much longer than the frontend, so we might end up with a several-minute period of what I could call "hidden downtime" where the two are out of sync and the frontend is trying to call API endpoints that don't exist yet or have changed in incompatible ways. (And this is still assuming we're responsible people who won't push the app to `master` in a state where the two are incompatible in the first place, of course.)
+
+However, it's also exactly because of that difference in build times that I'd like to have a fast loop for the frontend, where there's a bigger chance of me slipping up with a typo or something and leaving the app in a state that needs a quick hotfix. Let me outsource my brain real quick:
+
+![Question to GPT](question.png)
+
+>*Typical.*
+
+Bite me. Anyway, what the oracle told me is that I've been doing everything wrong, starting with the fact I use "latest" as the tag for my images in the compose file. Considering that our ideal flow is like this:
+
+- push to master and release a new version into the registry on any of the app repos
+- OR change the compose template in its own repo when we add or remove something
+- the host machine gets the newest compose template (if applicable) and pulls the latest images it needs, then runs them
+
+What we should be doing is:
+- we tag the images with their unique commit digests as we build/push them
+- we have the IaC repo store a committed .env file with the tags of the images currently in use
+- when CI is done on one of the app repos, it automatically commits a new version of the .env file where the hash has changed; depending on whether we've changed both backend and frontend or just one of them, only one or both of them will change, but only when both are actually built and in the registry in the latter case
+- this triggers CD in the IaC repo, we push the new state to the machine and deploy it
+
+What's more, I thought ahead and asked GPT about how we could do blue-green deployments with our general setup.
+
+>*Please explain for the interns, juniors and students in the audience.*
+
+Basically, as I've noted in the gallery of horrors in the first post, the way we currently do updates - taking containers down before putting them back up with a new version of their image - necessarily involves some downtime. A strategy that Enterprise-Quality Programmers employ to avoid this is to have two instances of the same service running behind a reverse proxy or load balancer, basically a micro scale of "horizontal scaling" where you add more machines and instances:
+
+- An update is pushed, the currently running instance is "blue"
+- We pull the new image and run it as "green"
+- When "green" is done starting up and can answer health checks, we make the proxy route incoming requests to "green"
+- We kill "blue" off and "green" takes its place, the users don't notice anything happened (if the service is stateless, anyway; this could get hairy if we have persistent websocket connections or anything of the sort, luckily we don't - I've researched ahead and noted getting around to that in my TODOs just for improvement's sake, though; maybe I'll cover this in post 3)
+- The bloody cycle of reincarnation continues on the next update, with green getting killed to make way for blue.
+
+We'll actually split the One True Compose into two down the line - there'll be a `main-machine` template with our actual apps, parameterized over blue and green, the Caddy in front of both, both will share a global/external Docker network, and there'll be a script to switch on deployment - but that's for later. We might also do splitting per environment and not repeat ourselves with services like `api-prod` and `api-demo`: both could be just `api` running in different Compose projects with an `ENV_NAME` parameter.
+
+### CI pipelines
+
+Let's begin by rebuilding the One True Compose to use environment variables for the image tags, for example:
+
+```
+services:
+  golem-prod:
+    image: ${GOLEM_IMAGE}
+```
+
+And commit a `versions.env` file that we will pass as an argument to docker-compose when we deploy:
+
+```
+GOLEM_IMAGE=ghcr.io/element-group-com-pl/goldenhand-golem:latest
+LANDING_PAGE_IMAGE=ghcr.io/element-group-com-pl/element-landing-page:latest
+```
+
+Now let's go to the landing page repo and implement the update logic in its CI, just adding this under the build and push steps we have so far:
+
+>*\[Record scratch\]*
+>*Wouldn't that be a little too much in one file? If I remember right, you already do builds, then you conditionally push, then you want to add the version-setting flow?*
+
+Actually, yeah, that's too much. Let's split into:
+
+- `build.yml` - this runs on PRs to master and just builds to see if the PR compiles
+- `publish.yml` - this runs on actual pushes, pushes to the container registry, and triggers:
+- `update.yml` - this will bump the version downstream
+
+`build.yml` will be mostly unchanged, we'll just delete the `push` trigger, the docker login action and disable the push flag in "build and push".
+
+`publish.yml` will get some additional steps that will create an artifact for the build, telling us what the new digest is:
+
+```yaml
+- name: Write digest artifact
+  if: steps.build.outputs.digest != ''
+  run: |
+    echo "ghcr.io/element-group-com-pl/element-landing-page@${{ steps.build.outputs.digest }}" > digest.txt
+- uses: actions/upload-artifact@v4
+  if: steps.build.outputs.digest != ''
+  with:
+    name: landing-digest-${{ github.sha }}
+    path: digest.txt
+```
+
+Then update.yml will look like this:
+
+```yaml
+name: update
+
+on:
+  workflow_run:
+    workflows: [publish]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+env:
+  TARGET_REPO: element-group-com-pl/element-iac
+  TARGET_BRANCH: main
+  LOCKFILE_PATH: main-machine/versions.env
+  KEY: LANDING_PAGE_VERSION
+
+jobs:
+  bump:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download digest artifact from publish run
+        id: dl
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run_id = context.payload.workflow_run.id
+            const { data: arts } = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner, repo: context.repo.repo, run_id
+            })
+            const art = arts.artifacts.find(a => a.name.startsWith('landing-digest-'))
+            if (!art) core.setFailed('No digest artifact found')
+            const { data: zip } = await github.rest.actions.downloadArtifact({
+              owner: context.repo.owner, repo: context.repo.repo,
+              artifact_id: art.id, archive_format: 'zip'
+            })
+            require('fs').writeFileSync('artifact.zip', Buffer.from(zip))
+      - run: unzip -o artifact.zip
+      - name: Checkout target (lockfile) repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.TARGET_REPO }}
+          ref: ${{ env.TARGET_BRANCH }}
+          token: ${{ secrets.GH_BOT_TOKEN }} # PAT with repo write on TARGET_REPO
+          path: lockrepo
+
+      - name: Update lockfile with digest
+        working-directory: lockrepo
+        run: |
+          set -euo pipefail
+          REF="$(cat digest.txt)"
+          sed -i -E "s|^(${KEY}=).*|\1${REF}|" "${LOCKFILE_PATH}"
+          git config user.name  "ci-bot"
+          git config user.email "ci-bot@users.noreply.github.com"
+          git checkout -B chore/landing-digest-${{ github.sha }}
+          git commit -am "chore(lock): ${KEY} -> ${REF}"
+          git push -u origin chore/landing-digest-${{ github.sha }}
+
+      - name: Open PR in target repo and enable auto-merge
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GH_BOT_TOKEN }}
+          path: lockrepo
+          base: ${{ env.TARGET_BRANCH }}
+          branch: chore/landing-digest-${{ github.sha }}
+          title: "chore(lock): ${KEY} -> $(cat digest.txt)"
+          add-paths: ${{ env.LOCKFILE_PATH }}
+      - uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          token: ${{ secrets.GH_BOT_TOKEN }}
+          pull-request-number: ${{ steps.create_pull_request.outputs.pull-request-number }}
+          merge-method: squash
+
+```
+
+Sike! That stuff didn't run and I spent way too much time trying to unfuck this chain of artifact-uploading and downloading and all that before we even got to the part where we push to the IaC repo. So let's move the update.yml to the IaC repo as its own custom action and callable workflow that will accept a list of versions as an argument:
+
+```yaml
+name: Update lockfile
+description: Replace or append KEY=VALUE pairs in a .env-style lockfile
+inputs:
+  lockfile_path:
+    description: Path to the .env lockfile to update
+    required: true
+  versions_lines:
+    description: Newline-separated KEY=VALUE pairs
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - shell: bash
+      env:
+        LOCKFILE: ${{ inputs.lockfile_path }}
+        LINES: ${{ inputs.versions_lines }}
+      run: |
+        set -euo pipefail
+        python3 .github/actions/update-lockfile/update_lockfile.py
+
+```
+
+GPT initially wanted to crap out a whole Python script as a YAML multiline string (ew) but I moved it out to its own `update_lockfile.py`:
+
+```python
+#!/usr/bin/env python3
+import os
+import sys
+
+lockfile = os.environ.get("LOCKFILE", "versions.env")
+lines_in = os.environ.get("LINES", "")
+
+if not lines_in:
+    print("No versions provided (LINES env is empty).", file=sys.stderr)
+    sys.exit(1)
+
+# Parse incoming KEY=VALUE pairs
+updates = {}
+for raw in lines_in.splitlines():
+    s = raw.strip()
+    if not s or s.startswith("#"):
+        continue
+    if "=" not in s:
+        print(f"Invalid line (no '='): {raw!r}", file=sys.stderr)
+        sys.exit(1)
+    k, v = s.split("=", 1)
+    k = k.strip()
+    v = v.strip()
+    if not k:
+        print(f"Invalid key in line: {raw!r}", file=sys.stderr)
+        sys.exit(1)
+    updates[k] = v
+
+# Read existing file (treat missing as empty)
+try:
+    with open(lockfile, "r", encoding="utf-8") as f:
+        cur = f.read().splitlines()
+except FileNotFoundError:
+    cur = []
+
+# Build index of existing keys (ignore commented lines)
+index = {}
+for i, ln in enumerate(cur):
+    ls = ln.lstrip()
+    if not ls or ls.startswith("#") or "=" not in ln:
+        continue
+    k = ln.split("=", 1)[0].strip()
+    if k and k not in index:
+        index[k] = i  # first occurrence wins
+
+# Replace existing keys or append new ones
+for k, v in updates.items():
+    line = f"{k}={v}"
+    if k in index:
+        cur[index[k]] = line
+    else:
+        cur.append(line)
+
+# Write back (ensure trailing newline)
+with open(lockfile, "w", encoding="utf-8") as f:
+    f.write("\n".join(cur) + "\n")
+
+```
+Then an `update.yml` workflow in IaC that refers to the action:
+
+```yaml
+name: update
+on:
+  workflow_call:
+    inputs:
+      lockfile_path:
+        type: string
+        required: true
+      versions_lines:
+        type: string
+        required: true
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/update-lockfile
+        with:
+          lockfile_path: versions.env
+          versions_lines: |
+            LANDING_PAGE_VERSION=ghcr.io/your-org/landing@sha256:abc...
+            GOLEM_IMAGE=ghcr.io/your-org/golem@sha256:def...
+      - name: Create PR
+        id: cpr
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: chore/lock-${{ github.run_id }}
+          base: main
+          commit-message: "chore(lock): bump ${{ github.event.client_payload.lockfile_path }}"
+          title: "chore(lock): bump ${{ github.event.client_payload.lockfile_path }}"
+          add-paths: ${{ github.event.client_payload.lockfile_path }}
+        # (Optional) Auto-approve if your branch protection requires 1 approval
+        # Grant "pull-requests: write" permission for this job (already set above).
+      # - name: Auto-approve PR
+      #   if: steps.cpr.outputs.pull-request-number != ''
+      #   uses: hmarr/auto-approve-action@v4
+      #   with:
+      #     pull-request-number: ${{ steps.cpr.outputs.pull-request-number }}
+      - name: Enable auto-merge
+        if: steps.cpr.outputs.pull-request-number != ''
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          pull-request-number: ${{ steps.cpr.outputs.pull-request-number }}
+          merge-method: squash
+```
+
+What this will do is let other repositories tell our IaC repo to update its `versions.env` file with new image refs passed as a newline-separated string of `KEY=VALUE` pairs. Now, we can go back to the landing page's `publish.yml` and add a second job that will call this workflow in the IaC repo:
+
+```yaml
+  build:
+  # ...push to docker
+      - name: Compute immutable ref
+        id: imm
+        run: echo "ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
+  bump-lockfile:
+    needs: build
+    uses: element-group-com-pl/element-iac/.github/workflows/update.yml@main
+    with:
+      lockfile_path: main-machine/versions.env
+      versions_lines: |
+        LANDING_PAGE_VERSION=${{ needs.build.outputs.ref }}
+```
+
+Some other snags we hit ~~before we got `element-landing-page` bumping its own version in the IaC repo automatically~~:
+
+- The org must have a setting that lets actions make pull requests at all:
+  ![allow PRs](actions-create.png)
+- And this global policy:
+  ![policies](policies.png)
+- The target repo must have a flag that lets other repos' actions see it:
+  ![allow access](accessible.png)
+- The calling workflow must have the same or higher permissions as the callee requires:
+  ![permissions](perm-diff.png)
+
+>*Wait, why was that crossed out?*
+
+### So that was a fucking lie
+
+I lied, I couldn't get this working without running into something that requires a PAT and gave up on this Frankenstein approach with juggling digest SHAs around, writing them to files or variables and then using them as inputs again. I'm taking a break for food and aspirin (for the headache) as I finish writing this sentence.
+
+### New plan
+
+What we *can* do is have our IaC repo just have a `deploy` workflow we can trigger through inter-repo events (`repository_dispatch`), which will unfortunately require a PAT, and have a self-hosted GitHub runner run on our machine and do the actual deployment. Instead of exact digests, we'll refer to our images with a tag like "release" or "prod", which we'll move to the newest version on every publication.
+
+
+[^1]: Behind the scenes: Traefik was also a possible solution, since it's apparently ready out of the box for our use case of routing to multiple Docker containers, but Caddy's easy one-file config won out over the massive *ENTERPRISE-GRADE* combine that isn't specialized to do a single thing described in one sentence. Also, I can see a way I could use Caddy locally for development when I need HTTPS for something (currently, we have a compile-time switch that makes the API serve over HTTPS in development; outsourcing that concern to Caddy would mean we get to delete code, which is what every developer loves most).
+[^2]: The early prototype I'd built in C# before the Realtime API had even dropped functioned purely over multiple HTTP requests where Twilio would call a "start_call" endpoint and we'd respond with a TwiML `<Gather>` asking it to collect user audio and give us a text transcription at another endpoint, "advance_conversation", which then responded with a `<Say>` containing the LLM's response and another `<Gather>` asking to do the same thing again. In between the different requests we'd store the conversation state in Redis. Currently, as the conversation is a persistent connection, we can do this stuff in memory (and as the LLM can use MCP tools we expose like "hang up", we also don't need to do hacky things like asking the LLM to output a blob of everything-JSON containing its next sentence, a "conversation should end" flag, etc).

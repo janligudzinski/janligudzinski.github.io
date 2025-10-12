@@ -882,7 +882,7 @@ frontend:
   - same story with env vars and host network
 ```
 
-And the demo versions of the frontend and backend run from a file *exactly like this* except `db` and `redis` are commented out and they point at those defined above by a `host.docker.internal` URL.
+And the demo versions of the frontend and backend were initially run from a file *exactly like this* except `db` and `redis` are commented out and they point at those defined above by a `host.docker.internal` URL.
 
 >*Did you find your CS degree in a bag of chips?*
 

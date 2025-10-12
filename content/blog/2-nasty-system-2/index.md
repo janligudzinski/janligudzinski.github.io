@@ -608,7 +608,7 @@ Some other snags we hit ~~before we got `element-landing-page` bumping its own v
 
 ### So that was a fucking lie
 
-I lied, I couldn't get this working without running into something that requires a PAT and gave up on this Frankenstein approach with juggling digest SHAs around, writing them to files or variables and then using them as inputs again. I'm taking a break for food and aspirin (for the headache) as I finish writing this sentence.
+I lied, I couldn't get this working without constantly running into an error or some suggested workaround that required a PAT anyway and just gave up on this Frankenstein approach with juggling digest SHAs around, writing them to files or variables and then using them as inputs again. I'm taking a break for food and aspirin (for the headache) as I finish writing this sentence.
 
 ### New plan
 
@@ -785,7 +785,81 @@ Docker-compose names its groupings of containers after the directory the .yml te
 
 ### New technical debt incurred so far:
 
-Down the line it might be a good idea to switch to the SOPS/`age` stack suggested by GPT, where we'll generate a key pair on the server, take the public half out and encrypt our .envs with it before committing them, rather than having to "manually remember" to update the untracked .envs and push them by SSH. However, we are trying to achieve our operational objective for this post here: get *everything* into a mostly sane CI/CD flow sooner than later.
+Down the line it might be a good idea to switch to the SOPS[^3]/`age` stack suggested by GPT, where we'll generate a key pair on the server, take the public half out and encrypt our .envs with it before committing them, rather than having to "manually remember" to update the untracked .envs and push them by SSH. However, we are trying to achieve our operational objective for this post here: get *everything* into a mostly sane CI/CD flow sooner than later.
+
+### Bringing the rest of the project in line
+
+We now need to change the workflows for `golem` and `landing-page` to tag the pushed image with a stable "release" tag (where "latest" is considered harmful), use a PAT (unfortunately necessary with the `repository_dispatch` approach we've taken), and trigger the IaC repo's deploy workflow when all is said and done.
+In `landing-page`'s `publish.yml`:
+
+```yaml
+- name: Promote to :release
+  run: |
+    docker buildx imagetools create \
+      -t ghcr.io/element-group-com-pl/element-landing-page:release \
+      ghcr.io/element-group-com-pl/element-landing-page@${{ steps.build.outputs.digest }}
+- name: Trigger deploy
+  uses: peter-evans/repository-dispatch@v3
+  with:
+    token: ${{ secrets.IAC_REPO_TOKEN }} # PAT with repo+workflow on element-iac
+    repository: element-group-com-pl/element-iac
+    event-type: deploy-main-machine
+    client-payload: '{"service":"landing"}'
+```
+Then the same thing in `golem`, just adding `id: build` to the build step so the promote step can refer to the digest. Then we change the `:latest` to `:release` in the IaC repo, push and everything goes fine.
+
+### The moment of truth
+
+Let's make a very small change to the landing page:
+
+![page diff](page-diff.png)
+
+![page runs](page-runs.png)
+
+![deploy fail](deploy-fail.png)
+
+Oops, we got Compose errors because we weren't `down`ing the old containers in the deploy script. Also, I had to manually restart the Github runner because when I'd started it as a daemon of my previous SSH session, it died when the session closed. Let's make it a system service so it auto-runs:
+
+```
+root@ubuntu-8gb-fsn1-1:/home/github-runner# ./svc.sh install github-runner
+Creating launch runner in /etc/systemd/system/actions.runner.element-group-com-pl.ubuntu-8gb-fsn1-1.service
+Run as user: github-runner
+Run as uid: 108
+gid: 111
+Created symlink /etc/systemd/system/multi-user.target.wants/actions.runner.element-group-com-pl.ubuntu-8gb-fsn1-1.service → /etc/systemd/system/actions.runner.element-group-com-pl.ubuntu-8gb-fsn1-1.service.
+root@ubuntu-8gb-fsn1-1:/home/github-runner# ./svc.sh start
+
+/etc/systemd/system/actions.runner.element-group-com-pl.ubuntu-8gb-fsn1-1.service
+● actions.runner.element-group-com-pl.ubuntu-8gb-fsn1-1.service - GitHub Actions Runner (element-group-com-pl.ubuntu-8gb-fsn1-1)
+     Loaded: loaded (/etc/systemd/system/actions.runner.element-group-com-pl.ubuntu-8gb-fsn1-1.service; enabled; preset: enabled)
+     Active: active (running) since Sun 2025-10-12 14:20:49 UTC; 27ms ago
+   Main PID: 1260907 (runsvc.sh)
+      Tasks: 2 (limit: 9260)
+     Memory: 1.1M (peak: 1.1M)
+        CPU: 21ms
+     CGroup: /system.slice/actions.runner.element-group-com-pl.ubuntu-8gb-fsn1-1.service
+             ├─1260907 /bin/bash /home/github-runner/runsvc.sh
+             └─1260910 ./externals/node20/bin/node ./bin/RunnerService.js
+
+Oct 12 14:20:49 ubuntu-8gb-fsn1-1 systemd[1]: Started actions.runner.element-group-com-pl.ubuntu-8gb-fsn1-1.service - GitHub Actions Runner (element-group-com-pl.ubuntu-8gb-fsn1-1).
+Oct 12 14:20:49 ubuntu-8gb-fsn1-1 runsvc.sh[1260907]: .path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
+Oct 12 14:20:49 ubuntu-8gb-fsn1-1 runsvc.sh[1260910]: Starting Runner listener with startup type: service
+Oct 12 14:20:49 ubuntu-8gb-fsn1-1 runsvc.sh[1260910]: Started listener process, pid: 1260917
+Oct 12 14:20:49 ubuntu-8gb-fsn1-1 runsvc.sh[1260910]: Started running service
+root@ubuntu-8gb-fsn1-1:/home/github-runner#
+root@ubuntu-8gb-fsn1-1:/home/github-runner# 2025-10-12 14:21:22Z: Running job: deploy
+2025-10-12 14:21:33Z: Job deploy completed with result: Succeeded
+```
+
+And so, after some unfortunate ~10 seconds of downtime we see:
+
+![run-success](run-success.png)
+
+![deployed-changes](deployed-changes.png)
+
+Woo! Obviously we immediately undo it to look professional and leave no trace of our experiments on a living organism.
+
 
 [^1]: Behind the scenes: Traefik was also a possible solution, since it's apparently ready out of the box for our use case of routing to multiple Docker containers, but Caddy's easy one-file config won out over the massive *ENTERPRISE-GRADE* combine that isn't specialized to do a single thing described in one sentence. Also, I can see a way I could use Caddy locally for development when I need HTTPS for something (currently, we have a compile-time switch that makes the API serve over HTTPS in development; outsourcing that concern to Caddy would mean we get to delete code, which is what every developer loves most).
-[^2]: The early prototype I'd built in C# before the Realtime API had even dropped functioned purely over multiple HTTP requests where Twilio would call a "start_call" endpoint and we'd respond with a TwiML `<Gather>` asking it to collect user audio and give us a text transcription at another endpoint, "advance_conversation", which then responded with a `<Say>` containing the LLM's response and another `<Gather>` asking to do the same thing again. In between the different requests we'd store the conversation state in Redis. Currently, as the conversation is a persistent connection, we can do this stuff in memory (and as the LLM can use MCP tools we expose like "hang up", we also don't need to do hacky things like asking the LLM to output a blob of everything-JSON containing its next sentence, a "conversation should end" flag, etc).
+[^2]: The early prototype I'd built in C#, before the Realtime API had even dropped in general availability, functioned purely over multiple HTTP requests where Twilio would call a "start_call" endpoint and we'd respond with a TwiML `<Gather>` asking it to collect user audio and give us a text transcription at another endpoint, "advance_conversation", which then responded with a `<Say>` containing the LLM's response and another `<Gather>` asking to do the same thing again. In between the different requests we'd store the conversation state in Redis. Currently, as the conversation is a persistent connection, we can do this stuff in memory (and as the LLM can use MCP tools we expose like "hang up", we also don't need to do hacky things like asking the LLM to output a blob of everything-JSON containing its next sentence, a "conversation should end" flag, etc).
+[^3]: [This thing](https://github.com/getsops/sops).

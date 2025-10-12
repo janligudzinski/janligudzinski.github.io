@@ -859,7 +859,185 @@ And so, after some unfortunate ~10 seconds of downtime we see:
 
 Woo! Obviously we immediately undo it to look professional and leave no trace of our experiments on a living organism.
 
+### Civilizing our main project
 
-[^1]: Behind the scenes: Traefik was also a possible solution, since it's apparently ready out of the box for our use case of routing to multiple Docker containers, but Caddy's easy one-file config won out over the massive *ENTERPRISE-GRADE* combine that isn't specialized to do a single thing described in one sentence. Also, I can see a way I could use Caddy locally for development when I need HTTPS for something (currently, we have a compile-time switch that makes the API serve over HTTPS in development; outsourcing that concern to Caddy would mean we get to delete code, which is what every developer loves most).
+You may have noticed we still don't have CI/CD for the main `goldenhand` project. That's because it will be the most complicated so far, the way it currently runs is a docker-compose roughly like this, pushed straight from the development environment:
+```
+db:
+  - refers to postgres by image tag which is good
+  - BUT has a volume local to this template for its data
+  - exposes itself on the local host network
+redis:
+  - also just uses the image tag from docker.io
+  - also has a volume
+  - exposes itself on the local host network
+backend:
+  - depends on db and redis
+  - builds from local dockerfile
+  - env vars passed in inline to refer to db and redis
+  - exposes itself on the local host network (so golem can reach it)
+frontend:
+  - depends on backend
+  - builds locally
+  - same story with env vars and host network
+```
+
+And the demo versions of the frontend and backend run from a file *exactly like this* except `db` and `redis` are commented out and they point at those defined above by a `host.docker.internal` URL.
+
+>*Did you find your CS degree in a bag of chips?*
+
+Sometimes I ask myself the same question.
+
+It's fine for them to have the same instance of the DB and Redis because each has its own logical database on the Postgres server and the things we put in the cache have unique IDs, but this is far from ideal. We will most likely have to take a gradual approach where we move out `frontend` and `backend` into their own composes (that refer to them as images from our registry instead of building locally). What would be closer to ideal is this:
+
+![ideal?](ideal.jpg)
+
+- let `db` and `redis` have their own compose project
+- let `backend`, `frontend` and `golem` live in a shared `apps.yml`, of which we'll spawn a `prod` instance and a `demo` one with different env files
+- `apps.yml` apps will see `db` and `redis` over a shared/"external" "backend" Docker network
+- Caddy sees only `apps.yml` apps over a shared "webnet" network like the one we define now
+- `db` and `redis`' volumes will also be `external` so we don't accidentally delete them
+
+Let's start with making the backend and frontend containers get pushed to the registry in CI. Besides two basic `build` jobs for pull requests, discriminated by the paths of the changed files, we'll have this slightly more complicated `publish.yml` workflow:
+
+```yaml
+name: monorepo-publish
+on:
+  push:
+    branches: [master]
+
+jobs:
+  changes: # We only want to build and publish the parts that have actually changed
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - backend/**
+            frontend:
+              - frontend/**
+
+  build-backend:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.common == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        id: build
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/element-group-com-pl/goldenhand-backend:sha-${{ github.sha }}
+            ghcr.io/element-group-com-pl/goldenhand-backend:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+
+  build-frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.common == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        id: build
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/element-group-com-pl/goldenhand-frontend:sha-${{ github.sha }}
+            ghcr.io/element-group-com-pl/goldenhand-frontend:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+
+  promote-and-deploy:
+    needs: [build-backend, build-frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Promote API to :release (if built)
+        if: needs.build-backend.outputs.digest != ''
+        run: |
+          docker buildx imagetools create \
+            -t ghcr.io/element-group-com-pl/goldenhand-backend:release \
+            ghcr.io/element-group-com-pl/goldenhand-backend@${{ needs.build-backend.outputs.digest }}
+
+      - name: Promote Frontend to :release (if built)
+        if: needs.build-frontend.outputs.digest != ''
+        run: |
+          docker buildx imagetools create \
+            -t ghcr.io/element-group-com-pl/goldenhand-frontend:release \
+            ghcr.io/element-group-com-pl/goldenhand-frontend@${{ needs.build-frontend.outputs.digest }}
+
+      - name: Trigger deploy
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.IAC_REPO_TOKEN }}
+          repository: element-group-com-pl/element-iac
+          event-type: update-main-machine
+          client-payload: '{"service":"app"}'
+```
+
+While we're at it, we'll also alter the backend's Dockerfile to use the newest Rust (pinning only to its major version which will ~always be 1), cargo-chef and a separate runtime stage to bring it in line with golem:
+
+![dockerfile diff](dockerfile-diff.png)
+
+*Why bother with the cargo-chef thing if we still re-run the build from zero every time on Github?*
+
+The docker-composes initially helped me develop things locally as much as deploy them, so having a quick rebuild loop was important - in fact, I might still want to manually check the image will build without errors before pulling the trigger and sending it out. Besides, haven't you seen how ugly our artisanal homegrown version of cargo-chef was?
+
+Also, having a specific Rust minor version pinned has actually led to deploy errors in the past when I was using some new feature that had just dropped in stable, but my machine couldn't build it with the old compiler. Pinning to 1.\*.\* means we will basically never have to think about this again (and in fact might have a newer compiler there than on my machine). Let's push.
+
+![why we did this separately](why-separate.png)
+
+This is why I thought ahead to separate the backend and frontend build - a Serious (TM), Enterprisey (TM) Rust project of our scale with multiple build and run time dependencies does NOT build quickly from zero in release mode without cache on a free-tier machine.
+This is actually *slower* than the previous flow which was part of why I kept putting off CI/CD for so long.
+
+The internet speeds on GitHub runners and data-center machines are pretty sweet, though, always blows me away how fast the dependencies get downloaded when I watch a remote build.
+
+Update after one run failed because I forgot to add the package-pushing permission and another because I forgot to set the IAC_REPO_TOKEN used at the very end: a full build takes 15 minutes on Github's provided runners. We must be missing some flag to actually use Github's cache properly; I'm told we can use our own registry as a cache:
+
+![registry as cache](registry-cache.png)
+
+After another build upwards of 15 minutes let's retrigger the build with the cache this time:
+
+![with cache](with-cache.png)
+
+Two and a half minutes. Much better!
+
+[^1]: Behind the scenes: Traefik was also a possible solution, since it's apparently ready out of the box for our use case of routing to multiple Docker containers, but Caddy's easy one-file config won out over the massive *ENTERPRISE-GRADE (TM)* combine that isn't specialized to do a single thing describable in one sentence. Also, I can see a way I could use Caddy locally for development when I need HTTPS for something (currently, we have a compile-time switch that makes the API serve over HTTPS in development; outsourcing that concern to Caddy would mean we get to delete code, which is what every developer loves most).
 [^2]: The early prototype I'd built in C#, before the Realtime API had even dropped in general availability, functioned purely over multiple HTTP requests where Twilio would call a "start_call" endpoint and we'd respond with a TwiML `<Gather>` asking it to collect user audio and give us a text transcription at another endpoint, "advance_conversation", which then responded with a `<Say>` containing the LLM's response and another `<Gather>` asking to do the same thing again. In between the different requests we'd store the conversation state in Redis. Currently, as the conversation is a persistent connection, we can do this stuff in memory (and as the LLM can use MCP tools we expose like "hang up", we also don't need to do hacky things like asking the LLM to output a blob of everything-JSON containing its next sentence, a "conversation should end" flag, etc).
-[^3]: [This thing](https://github.com/getsops/sops).
+[^3]: [This thing](https://github.com/getsops/sops). Supposedly it's made by Mozilla.

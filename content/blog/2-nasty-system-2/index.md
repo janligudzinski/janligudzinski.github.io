@@ -1,8 +1,8 @@
 +++
 authors = ["Jan Ligudziński"]
-title = "In which I fix a nasty production system: #2 - More CI and Docker Compose cleanup"
-description = "Lots of me vs. GitHub combat"
-date = 2025-10-11
+title = "In which I fix a nasty production system: #2 - Actual complete CI/CD"
+description = "Lots of me vs. GitHub combat."
+date = 2025-10-13
 [taxonomies]
 tags = ["nasty system", "programming", "rust", "devops", "docker", "compose", "war story"]
 +++
@@ -1036,7 +1036,56 @@ After another build upwards of 15 minutes let's retrigger the build with the cac
 
 ![with cache](with-cache.png)
 
-Two and a half minutes. Much better!
+Two and a half minutes. Much better! We'll also apply this to `golem`. `landing-page` doesn't really need it - it very rarely changes, mostly when a new client drops and we want to boast about it.
+
+While I was creating the "final", "totally final this time I swear", canonical compose layout, I also made the main `goldenhand` repo's publish job separately build the demo version of the frontend app and push it to the registry with a `release-demo` tag, as Angular environments are decided at compile time and we can't just swap in different env vars like we do with our backend containers.
+
+Ultimately, in the IaC repo I ended up with a deploy script like this:
+
+```bash
+
+```
+
+### Other hiccups
+
+After I finally managed to have the deploy pipeline pull my backend images, they were all bouncing my requests with a 502 and a `docker ps` showed they were constantly "restarting (101)". This was because up to this point we were doing our SeaORM migrations manually by passing the appropriate `DATABASE_URL` as an env var *before* deploying the new code...
+
+>*💀💀💀💀💀💀💀💀💀*
+
+...so now the seeding jobs that run on startup were crashing out because a table wasn't present yet. I added this to my DB layer code to run on startup after I get a DB connection:
+
+```rust
+#![allow(async_fn_in_trait)]
+#[allow(unused_imports)]
+pub(crate) mod entities;
+
+#[allow(unused_imports)]
+pub mod migrator;
+pub mod repositories;
+pub mod seeding;
+
+pub async fn run_migrations(db: &sea_orm::DatabaseConnection) {
+    log::info!("Running database migrations...");
+    use migrator::Migrator;
+    use sea_orm_migration::MigratorTrait;
+    Migrator::up(db, None).await.unwrap();
+    log::info!("Database migrations complete.");
+}
+```
+
+I think this is probably the first time we see any Rust in this series despite the system's most important piece being built in it.
+Anyway, after I established that the API would start up correctly, I took everything but the DB down for a while, copied over the dump from the old one, re-ran the deploy pipeline, and we've done it. We've restored the system to its previous state (thank fuck we're a small business with few users), my usual login and password remembered in the browser worked right away, and I think in coming posts we'll be free to focus on uncluttering the code itself.
+
+## Takeaways
+
+- Proper CI/CD is **painful** to implement after a project has gotten complex and has multiple moving parts. Just do it right away, like, immediately, no excuses.
+- Ditto for DB migration flows: they should be automated so they follow from the above.
+
+I don't think we'll be able to fit blue/green deployments into this post, I'm tired and so are you, though they are still a high priority as downtime is to be avoided.
+
+
+
+Let's maybe skip over the problems I had with copying the backup of the old DB instance to the new one.
 
 [^1]: Behind the scenes: Traefik was also a possible solution, since it's apparently ready out of the box for our use case of routing to multiple Docker containers, but Caddy's easy one-file config won out over the massive *ENTERPRISE-GRADE (TM)* combine that isn't specialized to do a single thing describable in one sentence. Also, I can see a way I could use Caddy locally for development when I need HTTPS for something (currently, we have a compile-time switch that makes the API serve over HTTPS in development; outsourcing that concern to Caddy would mean we get to delete code, which is what every developer loves most).
 [^2]: The early prototype I'd built in C#, before the Realtime API had even dropped in general availability, functioned purely over multiple HTTP requests where Twilio would call a "start_call" endpoint and we'd respond with a TwiML `<Gather>` asking it to collect user audio and give us a text transcription at another endpoint, "advance_conversation", which then responded with a `<Say>` containing the LLM's response and another `<Gather>` asking to do the same thing again. In between the different requests we'd store the conversation state in Redis. Currently, as the conversation is a persistent connection, we can do this stuff in memory (and as the LLM can use MCP tools we expose like "hang up", we also don't need to do hacky things like asking the LLM to output a blob of everything-JSON containing its next sentence, a "conversation should end" flag, etc).

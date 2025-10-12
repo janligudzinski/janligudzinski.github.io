@@ -612,8 +612,180 @@ I lied, I couldn't get this working without running into something that requires
 
 ### New plan
 
-What we *can* do is have our IaC repo just have a `deploy` workflow we can trigger through inter-repo events (`repository_dispatch`), which will unfortunately require a PAT, and have a self-hosted GitHub runner run on our machine and do the actual deployment. Instead of exact digests, we'll refer to our images with a tag like "release" or "prod", which we'll move to the newest version on every publication.
+What we *can* do is have our IaC repo just have a `deploy` workflow we can trigger through inter-repo events (`repository_dispatch`), which will unfortunately require a PAT, and have a self-hosted GitHub runner run on our machine and do the actual deployment. Instead of exact digests, we'll refer to our images with a tag like "release" or "prod", which we'll move to the newest version on every publication, and thus avoid the unstable and discouraged "latest". How will the "actual deployment" part work?
+Github recommends that we use a "self-hosted runner" and configure the job to "runs-on" it, let's install it:
 
+```
+root@ubuntu-8gb-fsn1-1:~# mkdir actions-runner && cd actions-runner
+root@ubuntu-8gb-fsn1-1:~/actions-runner# curl -o actions-runner-linux-x64-2.328.0.tar.gz -L https://github.com/actions/runner/releases/download/v2.328.0/actions-runner-linux-x64-2.328.0.tar.gz
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+100  216M  100  216M    0     0   195M      0  0:00:01  0:00:01 --:--:--  273M
+root@ubuntu-8gb-fsn1-1:~/actions-runner# echo "01066fad3a2893e63e6ca880ae3a1fad5bf9329d60e77ee15f2b97c148c3cd4e  actions-runner-linux-x64-2.328.0.tar.gz" | shasum -a 256 -c
+actions-runner-linux-x64-2.328.0.tar.gz: OK
+root@ubuntu-8gb-fsn1-1:~/actions-runner# tar xzf ./actions-runner-linux-x64-2.328.0.tar.gz
+root@ubuntu-8gb-fsn1-1:~/actions-runner# ls
+actions-runner-linux-x64-2.328.0.tar.gz  bin  config.sh  env.sh  externals  run-helper.cmd.template  run-helper.sh.template  run.sh  safe_sleep.sh
+root@ubuntu-8gb-fsn1-1:~/actions-runner# rm actions*
+root@ubuntu-8gb-fsn1-1:~/actions-runner# ls
+bin  config.sh  env.sh  externals  run-helper.cmd.template  run-helper.sh.template  run.sh  safe_sleep.sh
+root@ubuntu-8gb-fsn1-1:~/actions-runner# ./config.sh --url https://github.com/element-group-com-pl --token (REDACTED)
+Must not run with sudo
+# we create a special user just for the runner
+adduser --system --group --home /home/github-runner github-runner
+usermod -aG docker github-runner
+cd ..
+mv ./actions-runner /home/github-runner/actions-runner
+su github-runner
+This account is currently unavailable
+# we can't actually do that but we can do `sudo -u github-runner whatever command`
+# (we redownload everything as we can't be arsed to muck with the file ownerships and permissions)
+cd /home/github-runner/actions-runner
+root@ubuntu-8gb-fsn1-1:/home/github-runner# sudo -u github-runner ./config.sh --url https://github.com/element-group-com-pl --token (REDACTED)
+
+--------------------------------------------------------------------------------
+|        ____ _ _   _   _       _          _        _   _                      |
+|       / ___(_) |_| | | |_   _| |__      / \   ___| |_(_) ___  _ __  ___      |
+|      | |  _| | __| |_| | | | | '_ \    / _ \ / __| __| |/ _ \| '_ \/ __|     |
+|      | |_| | | |_|  _  | |_| | |_) |  / ___ \ (__| |_| | (_) | | | \__ \     |
+|       \____|_|\__|_| |_|\__,_|_.__/  /_/   \_\___|\__|_|\___/|_| |_|___/     |
+|                                                                              |
+|                       Self-hosted runner registration                        |
+|                                                                              |
+--------------------------------------------------------------------------------
+
+# Authentication
+
+
+√ Connected to GitHub
+
+# Runner Registration
+
+Enter the name of the runner group to add this runner to: [press Enter for Default]
+
+Enter the name of runner: [press Enter for ubuntu-8gb-fsn1-1]
+
+This runner will have the following labels: 'self-hosted', 'Linux', 'X64'
+Enter any additional labels (ex. label-1,label-2): [press Enter to skip]
+
+√ Runner successfully added
+√ Runner connection is good
+
+# Runner settings
+
+Enter name of work folder: [press Enter for _work]
+
+√ Settings Saved.
+
+root@ubuntu-8gb-fsn1-1:/home/github-runner# sudo -u github-runner ./run.sh
+
+√ Connected to GitHub
+
+Current runner version: '2.328.0'
+2025-10-11 18:19:05Z: Listening for Jobs
+^CExiting...
+Runner listener exit with 0 return code, stop the service, no retry needed.
+Exiting runner...
+root@ubuntu-8gb-fsn1-1:/home/github-runner# sudo -u github-runner ./run.sh &
+[1] 1165533
+root@ubuntu-8gb-fsn1-1:/home/github-runner#
+√ Connected to GitHub
+
+Current runner version: '2.328.0'
+2025-10-11 18:19:14Z: Listening for Jobs
+```
+
+Tada:
+
+![runner running](runner.png)
+
+Now, we can create a new, really minimal `deploy.yml` workflow in the IaC repo that will run on `repository_dispatch`, `push` and `workflow_dispatch` (so we can manually test it) events:
+
+```yaml
+name: deploy
+on:
+  push:
+    branches: ["main"]
+  repository_dispatch:
+    types: [update-main-machine]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    concurrency: "main-machine"
+    runs-on: [self-hosted, linux]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Login to GHCR (read-only PAT)
+        run: echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      - name: Pull & apply
+        working-directory: main-machine
+        run: |
+          docker compose pull
+          docker compose up -d --remove-orphans
+```
+
+(We'll have to manually pull down the other compose btw)
+
+I also set the PAT to the one we used earlier:
+
+![secret](secret.png)
+
+One last thing to hold up at before we pull the trigger: the `.env` files our compose refers to won't actually be there when the machine pulls the repo from Github, because we wisely .gitignored them. Up until now, our deployments consisted of us pushing the whole `main-machine` directory over SSH, us `cd`ing into it with the .envs safely transferred from our local dev box as well, and manually chanting the usual spells.
+
+There are at this point three sane options:
+
+- Use a fancy third-party secret manager, like they do at Big Enterprise (TM). This is yet another additional resource for us to create and keep track of, and the path of most resistance.
+- Commit the .envs in some asymmetrically encrypted form (we still have to do decryption on the host) - likely the best overall, but still more work when I just want to get this over with
+- Create a global directory for them on the machine and point the IaC files at it with an absolute path - lazy, but this will actually work, and I can do a very quick and dirty Bash script to update them every time they change on my dev box:
+
+```bash
+#!/bin/bash
+ssh root@machine 'mkdir -p /opt/element/env'
+rsync -av ./env/ root@machine:/opt/element/env
+ssh root@machine 'chown -R github-runner /opt/element/env' # so our runner can access them
+```
+
+And change the compose entries accordingly:
+
+```yaml
+services:
+  golem-prod:
+    image: ghcr.io/element-group-com-pl/goldenhand-golem:latest # <-- we'll eventually change this to an actual tag like "current release"
+    pull_policy: always
+    env_file:
+      - /opt/element/env/golem/.env.prod # <- where we put the envs now
+    ports:
+      - "5100:5100"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5100/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - webnet
+# ...
+```
+
+Let's quickly take down the old compose, push and what do we see in our SSH?
+
+```
+root@ubuntu-8gb-fsn1-1:~# 2025-10-11 19:56:41Z: Running job: deploy
+2025-10-11 19:56:51Z: Job deploy completed with result: Succeeded
+```
+
+Check the services? They all run. Wonderful. We can decommission the old `main-machine` repository's clone on said machine now.
+
+{% alert(caution=true) %}
+Docker-compose names its groupings of containers after the directory the .yml template is in. Because we recreated the manually pulled `main-machine` directory exactly in our CI pull, the new one and the old one were named the same and so `down`ing the old one before deleting it took down the containers the new one had spawned (so I manually started the deploy job again and fixed it). Don't be like me, just do things right from the start.
+{% end %}
+
+### New technical debt incurred so far:
+
+Down the line it might be a good idea to switch to the SOPS/`age` stack suggested by GPT, where we'll generate a key pair on the server, take the public half out and encrypt our .envs with it before committing them, rather than having to "manually remember" to update the untracked .envs and push them by SSH. However, we are trying to achieve our operational objective for this post here: get *everything* into a mostly sane CI/CD flow sooner than later.
 
 [^1]: Behind the scenes: Traefik was also a possible solution, since it's apparently ready out of the box for our use case of routing to multiple Docker containers, but Caddy's easy one-file config won out over the massive *ENTERPRISE-GRADE* combine that isn't specialized to do a single thing described in one sentence. Also, I can see a way I could use Caddy locally for development when I need HTTPS for something (currently, we have a compile-time switch that makes the API serve over HTTPS in development; outsourcing that concern to Caddy would mean we get to delete code, which is what every developer loves most).
 [^2]: The early prototype I'd built in C# before the Realtime API had even dropped functioned purely over multiple HTTP requests where Twilio would call a "start_call" endpoint and we'd respond with a TwiML `<Gather>` asking it to collect user audio and give us a text transcription at another endpoint, "advance_conversation", which then responded with a `<Say>` containing the LLM's response and another `<Gather>` asking to do the same thing again. In between the different requests we'd store the conversation state in Redis. Currently, as the conversation is a persistent connection, we can do this stuff in memory (and as the LLM can use MCP tools we expose like "hang up", we also don't need to do hacky things like asking the LLM to output a blob of everything-JSON containing its next sentence, a "conversation should end" flag, etc).

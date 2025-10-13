@@ -1080,6 +1080,9 @@ Anyway, after I established that the API would start up correctly, I took everyt
 
 - Proper CI/CD is **painful** to implement after a project has gotten complex and has multiple moving parts. Just do it right away, like, immediately, no excuses.
 - Ditto for DB migration flows: they should be automated so they follow from the above.
+- Monorepos are actually kind of painful to set up for CI/CD. Maybe this would not be such a problem if I'd picked a backend language with a less drastic average compile time.
+  - On the other hand, we've actually got a cache now, so we could maybe afford to just indiscriminately "build" both images. Food for thought.
+  - Speaking of compile times, we might have to take a look at optimizing our Angular app's builds. Maybe try to use Bun as the runtime?
 
 I don't think we'll be able to fit blue/green deployments into this post, I'm tired and so are you, though they are still a high priority as downtime is to be avoided.
 

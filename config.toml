@@ -29,6 +29,5 @@ bottom_footnotes = true
 [extra]
 [extra.nav]
   links = [
-    { name = "Home", url = "/" },
-    { name = "Blog", url = "/blog/" }
+    { name = "Home", url = "/" }
   ]

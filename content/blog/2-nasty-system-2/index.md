@@ -1043,10 +1043,47 @@ While I was creating the "final", "totally final this time I swear", canonical c
 Ultimately, in the IaC repo I ended up with a deploy script like this:
 
 ```bash
+# Pre-create external Docker networks and volumes *if* they don't exist:
+# - infra_net connects backend services to the DB and Redis
+# - edge_net connects the reverse proxy to the backend services but doesn't know about DB/Redis
+# - db_data is external because we want to copy data from an old named volume
+# Idempotent create (quiet)
+if docker network inspect infra_net >/dev/null 2>&1; then
+  echo "Network infra_net already exists (good)"
+else
+  docker network create infra_net
+fi
+if docker network inspect edge_net >/dev/null 2>&1; then
+  echo "Network edge_net already exists (good)"
+else
+  docker network create edge_net
+fi
+
+if docker volume inspect db_data >/dev/null 2>&1; then
+  echo "Volume db_data already exists (good)"
+else
+  docker volume create db_data
+fi
+
+# Pull the latest images for the services defined in both docker-composes
+docker-compose -f ./infra/docker-compose.yml pull
+docker-compose -f ./apps/docker-compose.yml pull
+docker-compose -f ./reverse-proxy/docker-compose.yml pull
+
+# Stop and remove containers, networks, and volumes defined in docker-compose.yml
+docker-compose -f ./infra/docker-compose.yml down
+docker-compose -f ./apps/docker-compose.yml down
+docker-compose -f ./reverse-proxy/docker-compose.yml down
+
+# Start the services in detached mode (running in the background)
+docker-compose -f ./infra/docker-compose.yml up -d
+docker-compose -f ./apps/docker-compose.yml up -d
+docker-compose -f ./reverse-proxy/docker-compose.yml up -d
 
 ```
 
 ### Other hiccups
+
 
 After I finally managed to have the deploy pipeline pull my backend images, they were all bouncing my requests with a 502 and a `docker ps` showed they were constantly "restarting (101)". This was because up to this point we were doing our SeaORM migrations manually by passing the appropriate `DATABASE_URL` as an env var *before* deploying the new code...
 
@@ -1073,8 +1110,87 @@ pub async fn run_migrations(db: &sea_orm::DatabaseConnection) {
 }
 ```
 
-I think this is probably the first time we see any Rust in this series despite the system's most important piece being built in it.
+Also, I think this is probably the first time we see any Rust in this series despite the system's most important piece being built in it.
 Anyway, after I established that the API would start up correctly, I took everything but the DB down for a while, copied over the dump from the old one, re-ran the deploy pipeline, and we've done it. We've restored the system to its previous state (thank fuck we're a small business with few users), my usual login and password remembered in the browser worked right away, and I think in coming posts we'll be free to focus on uncluttering the code itself.
+
+### More fuckups
+
+One component of our backend sub-system relies on Chromium: we generate some standardized documents as styled HTML pretending to be an A4 sheet of paper, launch a headless Chromium, make it open the HTML and spit it out as a PDF. When I deployed this code, the change to cargo-chef and a separate runtime stage caused two bugs:
+
+- first, trivial, the API's PDF methods returned a 500 saying the HTML templates couldn't be found
+  - this was simply because the final image didn't have the whole source code anymore, so all I needed to do was to copy the `ASSETS_DIR` directory from `src/infrastructure/pdf` and point the app at it with the appropriate env var
+- second, less trivial: after fixing the former bug, calling them caused the whole API to become unresponsive with Docker being none the wiser and just saying it was "up(unhealthy)" in `docker ps`
+  - upon investigation, this was most likely because the `rust` images come with a full home directory/common env vars for the running user set up, so Chromium could write the config files it normally expects to create; by contrast the runtime `debian:bookworm-slim` image, which we now copy our executable and into and in which we still install Chromium and fonts, is way more barebones and when I checked the logs, Chromium was just endlessly restarting with the Rust side of the library waiting for it to stabilize forever.
+
+  I fixed this with the following lines:
+  ```dockerfile
+  # Create dirs for Chromium (idempotent; assumes user/group already exist)
+  RUN mkdir -p /home/nonroot
+  RUN mkdir -p /tmp/runtime-dir
+
+  ENV HOME=/home/nonroot
+  ENV XDG_RUNTIME_DIR=/tmp/runtime-dir
+
+
+  ENV HOME=/home/nonroot
+  ENV XDG_RUNTIME_DIR=/tmp/runtime-dir
+  ENV CHROME_PATH=/usr/bin/chromium
+  ```
+
+
+![columbo](columbo.webp)
+>*Wait, just one more thing, why the compose down all this time?*
+
+And here you find out just how embarrassingly out of the loop I'd been before undertaking this effort. It turns out that `docker-compose` is deprecated for `docker compose` which are two completely different packages. I'd been using the former on the Ubuntu server, where the `docker-compose` package name still refers to this old hyphenated one, unlike my Arch dev box where it's the new one (and aliases the old `docker-compose` command to itself). That is why, when I was first deploying manually, I noticed that running `docker-compose up -d` when containers were already up resulted in a bunch of cryptic Python errors about `ContainerConfig` and such filling the screen, and in this way I developed my inefficient, excessive-downtime-incurring flow of always `down`ing everything before bringing it back up. It *worked*, so I got used to it, kind of like maybe a habit of resetting the whole computer with the hardware button if the browser freezes.
+
+>*💀💀💀*
+
+Bind a hotkey to the skull emoji, it's going to be your new favorite one.
+
+Let me fix that right quick:
+
+```
+Last login: Mon Oct 13 07:42:21 2025 from 46.134.87.202
+root@ubuntu-8gb-fsn1-1:~# apt search docker compose
+Sorting... Done
+Full Text Search... Done
+docker-buildx/noble-updates 0.21.3-0ubuntu1~24.04.1 amd64
+  Docker CLI plugin for extended build capabilities with BuildKit
+
+docker-compose/noble,now 1.29.2-6ubuntu1 all [installed]
+  define and run multi-container Docker applications with YAML
+
+docker-compose-v2/noble-updates 2.37.1+ds1-0ubuntu2~24.04.1 amd64 <----- THIS IS WHAT WE SHOULD HAVE GOTTEN
+  tool for running multi-container applications on Docker
+
+podman-compose/noble 1.0.6-1 all
+  Run docker-compose.yml using podman
+
+python3-ck/noble 1.9.4-1.1 all
+  Python3 light-weight knowledge manager
+
+python3-compose/noble,now 1.29.2-6ubuntu1 all [installed,automatic]
+  Python implementation of docker-compose file specification
+
+resource-agents-extra/noble 1:4.13.0-1ubuntu4 amd64
+  Cluster Resource Agents
+
+root@ubuntu-8gb-fsn1-1:~# apt install docker-compose-v2
+```
+
+And our deploy script can now look like this:
+
+```bash
+# Pull the latest images for the services defined in docker-composes
+docker compose -f ./infra/docker-compose.yml pull
+docker compose -f ./apps/docker-compose.yml pull
+docker compose -f ./reverse-proxy/docker-compose.yml pull
+
+# Start the services in detached mode (running in the background)
+docker compose -f ./infra/docker-compose.yml up -d
+docker compose -f ./apps/docker-compose.yml up -d
+docker compose -f ./reverse-proxy/docker-compose.yml up -d
+```
 
 ## Takeaways
 
@@ -1083,12 +1199,11 @@ Anyway, after I established that the API would start up correctly, I took everyt
 - Monorepos are actually kind of painful to set up for CI/CD. Maybe this would not be such a problem if I'd picked a backend language with a less drastic average compile time.
   - On the other hand, we've actually got a cache now, so we could maybe afford to just indiscriminately "build" both images. Food for thought.
   - Speaking of compile times, we might have to take a look at optimizing our Angular app's builds. Maybe try to use Bun as the runtime?
+- Spinning off the fact that on Arch I never knew the difference between hyphenated and spaced compose, it pays off to be familiar with your actual deployment environment (I haven't used Ubuntu or its spin-offs since middle school).
 
-I don't think we'll be able to fit blue/green deployments into this post, I'm tired and so are you, though they are still a high priority as downtime is to be avoided.
+I don't think we'll be able to fit blue/green deployments into this post, I'm tired and so are you, though they are still a high priority as downtime is to be avoided. In the next posts however we might get around to code changes and refactoring, and in the meantime we'll avoid deploying to prod too often by employing a separate `develop` branch to merge to.
 
 
-
-Let's maybe skip over the problems I had with copying the backup of the old DB instance to the new one.
 
 [^1]: Behind the scenes: Traefik was also a possible solution, since it's apparently ready out of the box for our use case of routing to multiple Docker containers, but Caddy's easy one-file config won out over the massive *ENTERPRISE-GRADE (TM)* combine that isn't specialized to do a single thing describable in one sentence. Also, I can see a way I could use Caddy locally for development when I need HTTPS for something (currently, we have a compile-time switch that makes the API serve over HTTPS in development; outsourcing that concern to Caddy would mean we get to delete code, which is what every developer loves most).
 [^2]: The early prototype I'd built in C#, before the Realtime API had even dropped in general availability, functioned purely over multiple HTTP requests where Twilio would call a "start_call" endpoint and we'd respond with a TwiML `<Gather>` asking it to collect user audio and give us a text transcription at another endpoint, "advance_conversation", which then responded with a `<Say>` containing the LLM's response and another `<Gather>` asking to do the same thing again. In between the different requests we'd store the conversation state in Redis. Currently, as the conversation is a persistent connection, we can do this stuff in memory (and as the LLM can use MCP tools we expose like "hang up", we also don't need to do hacky things like asking the LLM to output a blob of everything-JSON containing its next sentence, a "conversation should end" flag, etc).

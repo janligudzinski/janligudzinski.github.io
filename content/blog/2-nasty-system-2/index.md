@@ -1111,7 +1111,7 @@ pub async fn run_migrations(db: &sea_orm::DatabaseConnection) {
 ```
 
 Also, I think this is probably the first time we see any Rust in this series despite the system's most important piece being built in it.
-Anyway, after I established that the API would start up correctly, I took everything but the DB down for a while, copied over the dump from the old one, re-ran the deploy pipeline, and we've done it. We've restored the system to its previous state (thank fuck we're a small business with few users), my usual login and password remembered in the browser worked right away, and I think in coming posts we'll be free to focus on uncluttering the code itself.
+Anyway, after I established that the API would start up correctly, I took everything but the DB down for a while, copied over the dump from the old one (embarrassing: took me a while to understand that Datagrip exports pg_dump files with a bunch of statements at the start that Postgres doesn't understand but you can safely cut out), re-ran the deploy pipeline, and we've done it. We've restored the system to its previous state (thank fuck we're a small business with few users), my usual login and password remembered in the browser worked right away, and I think in coming posts we'll be free to focus on uncluttering the code itself.
 
 ### More fuckups
 

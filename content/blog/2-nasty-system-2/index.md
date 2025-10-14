@@ -2,7 +2,7 @@
 authors = ["Jan Ligudziński"]
 title = "In which I fix a nasty production system: #2 - Actual complete CI/CD"
 description = "Lots of me vs. GitHub combat."
-date = 2025-10-13
+date = 2025-10-14
 [taxonomies]
 tags = ["nasty system", "programming", "rust", "devops", "docker", "compose", "war story"]
 +++

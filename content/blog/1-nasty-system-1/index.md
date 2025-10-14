@@ -2,7 +2,7 @@
 authors = ["Jan Ligudziński"]
 title = "In which I fix a nasty production system: #1 - Landing page"
 description = "If only you knew how bad things really are."
-date = 2025-10-09
+date = 2025-10-10
 [taxonomies]
 tags = ["nasty system", "programming", "rust", "devops", "docker", "compose", "war story"]
 +++

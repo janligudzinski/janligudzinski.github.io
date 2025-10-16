@@ -233,7 +233,7 @@ Finally, let's upload the dumps to our Hetzner S3. I just had to manually create
 
 We'll add `rclone` to the container, which is like `rsync` but for S3 and not ssh - a CLI tool that syncs the state of a physical machine's directory with the contents of a bucket. Thankfully it's in the Alpine Linux repo, so once again we just add it to the `apk add` line.
 
-The S3 keys, unlike my backup script's public key, actually need to be secret, so I'll pass them in the untracked .env file the backup script already uses as we have done so far. The 4 variables to include are `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_BUCKET`, `S3_REGION` and `S3_ENDPOINT`), with an `RCLONE_` prefix for `rclone` to pick them up automatically as told by the inline `env_auth` flag (except `BUCKET` which has to be passed explicitly, but I'll keep the RCLONE_ for consistency):
+The S3 keys, unlike my backup script's public key, actually need to be secret, so I'll pass them in the untracked .env file the backup script already uses as we have done so far. The 5 variables to include are `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_BUCKET`, `S3_REGION` and `S3_ENDPOINT`), with an `RCLONE_` prefix for `rclone` to pick them up automatically as told by the inline `env_auth` flag (except `BUCKET` which has to be passed explicitly, but I'll keep the RCLONE_ for consistency):
 
 ```bash
 # backup.sh

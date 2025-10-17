@@ -251,8 +251,27 @@ As we've now also established that the backup job does in fact fire at 03:17 whe
 
 >*Why 03:17?*
 
-There is this superstition around from the bad old days of everyone sharing compute on not just the same physical server but the same multi-user OS without virtualization that because everyone instinctively uses round hours that end in 0 or 5 for their regular jobs, those times are when the server is busy with everyone's work and your own will be slower for it, so you should pick odd, irregular-looking times to have more CPU time and RAM to yourself. This is likely a non-issue in the big AD 2025, but is a good practice in case we undergo a civilizational collapse that sets us back to managed PHP hosting, or, worse, Java servlets on Tomcat.
+There is this superstition around from the bad old days of everyone sharing compute on not just the same physical server but the same multi-user OS without virtualization that because everyone instinctively uses round hours that end in 0 or 5 for their regular jobs, those times are when the server is busy with everyone's work and your own will be slower for it, so you should pick odd, irregular-looking times to have more CPU time and RAM to yourself. This is likely a non-issue in the big AD 2025, but is a good practice in case we undergo a civilizational collapse that sets us back to managed PHP hosting, or, possibly worse, Java servlets on Tomcat.
 
 ## Separate deploys for prod and demo
 
 Moving on, let's divorce `prod` from `demo` in our CI/CD pipeline - a push to `develop` should make a different tag in our registry than a push to `master` or `main`, and in fact we already kind of do this, though the `frontend:release-demo` image is still built from the master branch and in sync with it. What's more, with our recent switch from Docker Compose v1 to v2, we can indiscriminately `up -d` with only the containers that have actually changed and been pulled anew getting downed first, so all we really need to do is conditionally switch the tag in our registry pushing action and use that tag in `apps.docker-compose.yml`.
+This will look roughly like this:
+
+```yaml
+- name: Promote API to :release or :release-demo (if built)
+        if: needs.build-backend.outputs.digest != ''
+        run: |
+          docker buildx imagetools create \
+            -t ghcr.io/element-group-com-pl/goldenhand-backend:${{ github.ref_name == 'develop' && 'release-demo' || 'release' }} \
+            ghcr.io/element-group-com-pl/goldenhand-backend@${{ needs.build-backend.outputs.digest }}
+```
+
+With logic like this, switching on the branch name that's been pushed to, we can even get rid of the ugly separate jobs for building and pushing the frontend image's demo version:
+
+```yaml
+#...
+build-args: |
+            BUILD_CONFIGURATION=${{ github.ref_name == 'develop' && 'demo' || 'production' }}
+#...
+```

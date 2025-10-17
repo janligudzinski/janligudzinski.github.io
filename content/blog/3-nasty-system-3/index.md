@@ -2,7 +2,7 @@
 authors = ["Jan Ligudziński"]
 title = "In which I fix a nasty production system: #3 - Backend refactoring, part 1"
 description = "Cargo-culting C# projects from work was a bad idea."
-date = 2025-10-14
+date = 2025-10-17
 [taxonomies]
 tags = ["nasty system", "programming", "rust", "war story", "refactoring"]
 +++
@@ -251,7 +251,7 @@ As we've now also established that the backup job does in fact fire at 03:17 whe
 
 >*Why 03:17?*
 
-There is this superstition around from the bad old days of everyone sharing compute on not just the same physical server but the same multi-user OS without virtualization that because everyone instinctively uses round hours that end in 0 or 5 for their regular jobs, those times are when the server is busy with everyone's work and your own will be slower for it, so you should pick odd, irregular-looking times to have more CPU time and RAM to yourself. This is likely a non-issue in the big AD 2025, but is a good practice in case we undergo a civilizational collapse that sets us back to managed PHP hosting, or, possibly worse, Java servlets on Tomcat.
+There is this superstition around from the bad old days of everyone sharing compute on not just the same physical server but the same multi-user OS without virtualization that because everyone instinctively uses round hours that end in 0 or 5 for their regular jobs, those times are when the server is busy with everyone's work and your own will be slower for it, so you should pick odd, irregular-looking times to have more CPU time and RAM to yourself. This is likely a non-issue in the big AD 2025, but is a good practice in case we undergo a civilizational collapse that sets us back to managed PHP[^1] hosting, or, worse, Java servlets on Tomcat[^2].
 
 ## Separate deploys for prod and demo
 
@@ -275,3 +275,9 @@ build-args: |
             BUILD_CONFIGURATION=${{ github.ref_name == 'develop' && 'demo' || 'production' }}
 #...
 ```
+
+
+## Footnotes
+
+[^1]: It's not a *terrible* language now that we can put it in a secure ghetto with Docker - not wanting to install it globally for a class in college was exactly why I learned containerization.
+[^2]: My prejudice against Java comes from experience. My prejudice against servlets on Tomcat comes from overhearing my dad's frustrated experience.

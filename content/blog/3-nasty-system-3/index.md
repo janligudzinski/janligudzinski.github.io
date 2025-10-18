@@ -276,6 +276,134 @@ build-args: |
 #...
 ```
 
+## Actually refactoring
+
+With all of the grimy deployment stuff out of the way, let's go into how botched my implementation of DDD-ish/clean-architecture-ish concepts was in this project and why.
+
+### Rampant, cruel abuse of repository pattern
+
+I think the single biggest blunder is the way I decided to cargo-cult the generic repository pattern from the C# world (considered harmful even there by some). When you can just expose Entity Framework's `IQueryable<T>`, get to map directly to your domain objects, modify those in place in memory then call `SaveChanges()` and have the diffs magically applied to the DB, you can get away with being very lazy with how you plan out your CRUD operations. I learned this as an impressionable junior and didn't stop to consider that: one, this is a leaky abstraction which makes the application-level commands and queries need to know how the persistence layer works on the EF side, and two, since we define the actual capabilities of our application on the eponymous layer, the repositories shouldn't be defined with the domain. How they got there at the particular workplace that taught me the pattern, I don't know; perhaps this was a leftover from "domain services" orchestrating saving data themselves? I think there might have been some audit log/versioned entity shenanigans going on as well, which could also explain it.
+
+Rust doesn't really have anything like EF in its offering of ORMs - the language's design is not very conducive to it, as you'd need your equivalent of the `DbContext` to always have a reference to the entities you've pulled, which wouldn't let you mutably do anything with them unless you used certain synchronization wrappers... etc, etc, not worth the bother. So, I was thankfully railroaded into defining specific repository traits for all of our business entities, but still they are not quite up to snuff. Why?
+
+The specific C-sharpish repository (anti-?)pattern we use here was intended, I think, for very repeatable, easily abstractable create/read/update/delete operations on concrete, complete entities, where we don't really need to pull out partial views or ask complex questions with short answers. Take for example the seeding procedure when my app first starts. Obviously, only an admin should be allowed to modify the list of clients, contractors, and clients' buildings, so before we start actually using the app we need there to be one, and we can't just let any random schmuck click himself into the job as soon as the API and frontend are up. Therefore, we have an initial username and password stored secretly in an environment variable and at startup ask these questions:
+- is there already anything in the `administrators` table (we use role-tables like this to bind capabilities to actual `users`)...
+  - ...where `user_id` matches an active user?
+(If yes, do nothing, if not, create a new user with the given username and password and give them an admin role.)
+This is a very specific query that can be perfectly well answered in an SQL one-liner: `SELECT TRUE as active_admin_exists FROM administrators a JOIN users u ON a.user_id = u.id WHERE u.is_active = TRUE` - but it doesn't map well to the generic repository pattern we have, and when I was formulating it months ago I think I must have had an inkling of how ridiculous it would have been for an `async fn check_if_administrator_exists(&self) -> Result<bool, RepositoryError>` method to be in there among `get_all`, `create` and so on, because I don't see one, but we do do shit like this:
+
+```rust
+async fn seed_initial_data(&self) {
+    self.seeding_service.seed().await.unwrap();
+    // TODO: move this to seeding service, or remove that service and make this modular
+    // Set up admin account if not already set up.
+
+    let query = GetAllActiveUsersQuery;
+    let users = query.handle(&self.user_repository).await.unwrap();
+
+    if users
+        .iter()
+        .any(|user| user.roles.contains(&UserRole::Administrator))
+    {
+        eprintln!("At least one admin account already exists. Aborting seeding.");
+        return;
+    }
+```
+
+>*💀💀💀*
+
+Yeah, this client-side filtering is retarded and I'm pretty sure it was vibe-coded overnight. Thankfully it only runs once at application startup and the volume of data is negligible. There's another dumb "repository-like" trait that took me some time to find while refactoring, much closer to what I described earlier:
+
+```rust
+pub trait DatabaseSeeder {
+    async fn ensure_counter_exists(&self) -> Result<(), RepositoryError>;
+}
+```
+
+(What happens here is that every time we take or make a new request for work to be done - a "work ticket" in our domain language - we give it a new sequential number. I originally thought we'd possibly have different number schemes or letter prefixes for different customers, so I made a separate `counter` table, then requirements got clarified and we count tickets globally and indiscriminately, however, the transactions used in ticket creations still expect one row with the current number to exist so they can grab and increment it. )
+
+>*What a business analyst you are!*
+
+Also, to really beat the nail into my coffin, compare these two concrete repositories and how they're instantiated:
+
+```rust
+#[derive(Clone)]
+pub struct SeaOrmWorkTicketRepository {
+    db: DatabaseConnection,
+}
+#[derive(Clone)]
+pub struct SeaOrmManagerRepository {
+    db: DatabaseConnection,
+}
+
+// ...
+let cooperative_repository = SeaOrmCooperativeRepository::new(db.clone());
+let ticket_repository = SeaOrmWorkTicketRepository::new(db.clone());
+let user_repository = SeaOrmUserRepository::new(db.clone());
+let contractor_repository = SeaContractorRepository::new(db.clone());
+let deadline_repository = SeaOrmDeadlineRepository::new(db.clone());
+let manager_repository = SeaOrmManagerRepository::new(db.clone());
+let database_seeder = SeaOrmDatabaseSeeder::new(db.clone());
+let cooperative_doc_repository = SeaOrmCooperativeDocumentRepository::new(db.clone());
+let ticket_doc_repository = SeaOrmTicketDocumentRepository::new(db.clone());
+
+let state = Self {
+    user_repository: user_repository_for_state,
+    session_store: session_store_for_state,
+    password_reset_token_store,
+    contractor_repository,
+    deadline_repository,
+    manager_repository,
+    seeding_service,
+    storage,
+    cooperative_document_repository: cooperative_doc_repository,
+    ticket_document_repository: ticket_doc_repository,
+    pdf_generator,
+    ticket_repository,
+    cooperative_repository,
+    mailer,
+    event_publisher: ChannelEventPublisher::new(),
+    thumbnail_service: ImageCrateThumbnailService,
+    in_app_notification_repository: SeaOrmInAppNotificationRepository::new(db.clone()),
+    api_key_repo: SeaOrmApiKeyRepository::new(db.clone()),
+    calls_repo: SeaOrmPhoneCallRepository::new(db.clone()),
+};
+```
+
+These types are completely identical under the hood and in fact share the exact same inner connection pool instance. I need to be publicly stoned, like with rocks, not weed.
+
+>*Yes.*
+
+Also, you can very easily see which repos are more recent additions.
+
+The solution I have in mind right now, long term, will be to do away with the repository pattern entirely in favor of hexagonal architecture's more abstract concept of *ports* - interfaces very specific to the application operations they enable. Thus we might get for example a `UserReadQueries` port that lets us `async fn admin_already_exists(&self) -> Result<bool, ApplicationError>` among other operations, whose name does not suggest the strict CRUD quadrinity (not sure if that's a real word, the Greek "tetrad" can work as well if it isn't) that `UserRepository` does.
+
+The short term one I can do right away is to move the repository traits up to the application layer and consolidate their concrete implementation in one `DbContext` struct we'll shamelessly crib from EF's one with the different per-entity traits standing in for an EF context's `DbSet<T>` properties. The `State` could easily be slimmed down to:
+
+```rust
+let state = Self {
+    db_context,
+    session_store: session_store_for_state,
+    password_reset_token_store,
+    seeding_service,
+    storage,
+    pdf_generator,
+    mailer,
+    event_publisher: ChannelEventPublisher::new(),
+    thumbnail_service: ImageCrateThumbnailService,
+};
+```
+
+I'm a one-man IT department but just for the sake of tracking changes and showing you the impact, I made a PR for the branch where I moved the repository traits to the application layer:
+
+![pr-1](pr-1.png)
+
+39 lines down, nice. One of these was a completely unrelated fix to CI, btw. Let's see how many lines we'll save by consolidating the implementations:
+
+### Placing other application-level concerns in the domain layer
+
+The repository traits are not the only traits defined in the domain layer when they should be specified by the application layer that actually uses them. Let's take for example
+
 
 ## Footnotes
 

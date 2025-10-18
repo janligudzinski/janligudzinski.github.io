@@ -323,7 +323,7 @@ pub trait DatabaseSeeder {
 }
 ```
 
-(What happens here is that every time we take or make a new request for work to be done - a "work ticket" in our domain language - we give it a new sequential number. I originally thought we'd possibly have different number schemes or letter prefixes for different customers, so I made a separate `counter` table, then requirements got clarified and we count tickets globally and indiscriminately, however, the transactions used in ticket creations still expect one row with the current number to exist so they can grab and increment it. )
+(What happens here is that every time we take or make a new request for work to be done - a "work ticket" in our domain language - we give it a new sequential number. I originally thought we'd possibly have different number schemes or letter prefixes for different customers, so I made a separate `counter` table, then requirements got clarified and we count tickets globally and indiscriminately, however, the transactions used in ticket creations still expect one row with the current number to exist so they can grab and increment it.)
 
 >*What a business analyst you are!*
 

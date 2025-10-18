@@ -394,18 +394,147 @@ let state = Self {
 };
 ```
 
-I'm a one-man IT department but just for the sake of tracking changes and showing you the impact, I made a PR for the branch where I moved the repository traits to the application layer:
+I'm a one-man IT department but just for the sake of tracking changes and showing you the impact, I made a PR for the branch where I moved the repository traits (and the associated error type) to the application layer where they are actually needed:
 
 ![pr-1](pr-1.png)
 
 39 lines down, nice. One of these was a completely unrelated fix to CI, btw. Let's see how many lines we'll save by consolidating the implementations:
 
+![pr-2](pr-2.png)
+
+Now we're cooking, 200 lines thrown out and more to come. You see, our application-level command and query handlers work in a particularly egregious case like this:
+
+```rust
+pub struct SavePhoneCallCommand {
+    pub id: Uuid,
+    pub caller_number: String,
+    pub started_at: chrono::DateTime<chrono::Utc>,
+    pub ended_at: chrono::DateTime<chrono::Utc>,
+    pub relevant: bool,
+    pub human_contact_requested: bool,
+    pub cooperative_id: Option<Uuid>,
+    pub apartment_number: Option<String>,
+    pub title: String,
+    pub summary: String,
+    pub transcript: CallTranscript,
+}
+impl SavePhoneCallCommand {
+pub async fn handle(
+    &self,
+    repository: &impl PhoneCallRepository,
+    coop_repo: &impl CooperativeRepository,
+    user_repository: &impl UserRepository,
+    ticket_repository: &impl WorkTicketRepository,
+    event_publisher: &impl EventPublisher,
+) -> Result<PhoneCallDto, ApplicationError> {
+// ...
+```
+
+Resulting in calls like this in the API/presentation layer now:
+
+```rust
+#[axum::debug_handler]
+async fn save_call(
+    State(state): State<AppState>,
+    _api_key: AdminApiKey,
+    Json(payload): Json<SavePhoneCallRequest>,
+) -> Result<Json<PhoneCallDto>, ApiError> {
+    let command = SavePhoneCallCommand::new(payload);
+    let call = command
+        .handle(
+            &state.db_context,
+            &state.db_context,
+            &state.db_context,
+            &state.db_context,
+            &state.event_publisher,
+        )
+        .await?;
+    Ok(Json(call))
+}
+```
+
+This is *slightly* preferable to before, where we had to pass in separate instances (of the same damn thing), but really not great. So we could do the following:
+
+```rust
+pub struct TicketEventProcessor<
+    Repos: WorkTicketRepository + UserRepository + InAppNotificationRepository,
+> {
+    notification_service: NotificationService<Repos>,
+    repos: Repos,
+}
+```
+
+The `+` lets us specify that we want to have something that implements multiple traits. However, this gets unwieldy in `impl` blocks:
+
+```rust
+impl<Repos: WorkTicketRepository + UserRepository + InAppNotificationRepository>
+    TicketEventProcessor<Repos>
+{
+  // ...
+```
+
+And also - which is ultimately a symptom of the bigger smell of the repository pattern as we use it - the traits often have overlapping method names, like `get_by_id`, which requires us to disambiguate like this:
+
+```rust
+async fn handle_ticket_comment_added(
+    &self,
+    event: TicketCommentAddedEvent,
+) -> Result<(), ApplicationError> {
+    let ticket = WorkTicketRepository::get_by_id(&self.repos, &event.ticket_id)
+        .await?
+        .ok_or(ApplicationError::NonexistentEntity(
+            "ticket",
+            event.ticket_id.clone(),
+        ))?;
+    let commenter = UserRepository::get_by_id(&self.repos, &event.author_id)
+        .await?
+        .ok_or(ApplicationError::NonexistentEntity(
+            "user",
+            event.author_id.clone(),
+        ))?;
+    // ...
+```
+
+I don't think we can fix the latter without radically renaming the methods or rethinking the pattern entirely - which I do want to do - but we might be able to do something about the former:
+
+```rust
+type Repos = impl WorkTicketRepository + UserRepository + InAppNotificationRepository;
+```
+
+Actually, no, that won't compile as this feature isn't stable yet and the issue is still under discussion. Still, this is arguably a net win, as this persistent "event processor" is one of the few places we actually need something to own such a generic multi-type; the individual command handlers will be able to just take in one DbContext as an inline `&impl WorkTicketRepository + UserRepository ...` param.
+One thing Copilot autocomplete suggested was a newtype wrapper, like `WorkTicketRepositoryWrapper(pub impl WorkTicketRepository)` I guess, but it'd be about equally ugly in my opinion.
+
+```rust
+impl GetTicketByIdWithRelationsQuery {
+    pub async fn handle(
+        &self,
+        repos: &(impl WorkTicketRepository + TicketDocumentRepository),
+    ) -> Result<Option<WorkTicketWithRelations>, ApplicationError> {
+        let mut ticket = match repos.get_by_id_with_relations(&self.id).await? {
+            Some(ticket) => ticket,
+            None => return Ok(None),
+        };
+        let images = repos.get_images_for_ticket(&self.id).await?;
+        ticket.images = images;
+        Ok(Some(ticket))
+    }
+}
+```
+
+We actually have to use parentheses here if we want to avoid the compiler yelling at us; this is ungainly, especially when we run into the methods with overlapping names, but the ungainliness itself is a sign that we're doing something wrong on a design level here. "Documents" are simply any files attached to tickets or "cooperatives"[^3], possibly viewable multimedia like pictures. There are two nearly identical tables for each kind, with the ticket-specific one also containing a thumbnail link as the usual use case for ticket documents is photos of things that need to be fixed (from the customers) and visual progress reports (from us) so we want to neatly show them as a clickable gallery.
+
+However, these per-table repositories are plainly retarded. The point of entry to a ticket's documents is the ticket itself. You don't get to add or remove documents if you're not allowed to view or handle the ticket. In DDD-speak the ticket is the  *aggregate root* here and the documents are strictly subordinate to it - we shouldn't be exposing a separate point of entry. This type of thing could easily be folded into a `TicketRepository`, if we wanted to stay with this pattern, or could be part of a write-model port like, let's say, `TicketWriteQueries`. There's more crap like this: `deadlines`, for instance - calendar dates that note when something like an electrical installation inspection needs to be done in a single building - do not deserve their own repository or API route prefix either. This we will address in the next round of refactoring. So far, we have eliminated every single occurrence of shit like `.handle(&state.db_context, &state.db_context, &state.db_context, &state.event_publisher)` for a cool 100 lines deleted:
+
+![pr-3](pr-3.png)
+
 ### Placing other application-level concerns in the domain layer
 
-The repository traits are not the only traits defined in the domain layer when they should be specified by the application layer that actually uses them. Let's take for example
-
+The repository traits are not the only traits defined in the domain layer when they should be specified by the application layer that actually uses them. At a gallop,
 
 ## Footnotes
 
 [^1]: It's not a *terrible* language now that we can put it in a secure ghetto with Docker - not wanting to install it globally for a class in college was exactly why I learned containerization.
 [^2]: My prejudice against Java comes from experience. My prejudice against servlets on Tomcat comes from overhearing my dad's frustrated experience.
+[^3]: This dumb term here comes from my hurried business analysis early on in the project - the domain term actually used in Polish is "wspólnota \[mieszkaniowa\]", which early on I understood as equivalent to a "spółdzielnia", what would in English be a "cooperative" literally and a "condo administration" idiomatically, but what would actually work better in English here is just "building".\
+That's it, a "wspólnota" usually covers just one tenement block (though multiple may in fact belong to a "spółdzielnia", a municipal government, or be under the care of a single "zarządca nieruchomości").\
+If you think that's dumb, I once understood "ślusarz" (a guy who drills into metal things and makes sure they line up, ie. a fitter) in some industrial software to be "locksmith" because that sense of "ślusarz" is way more common, and with any luck now there's possibly a production planning web app running somewhere in a factory in China that shows a Gantt chart of "**锁匠**作业" planned for the next three shifts and some Chinaman must be thinking "what the hell were the Poles on? What we do here is clearly **钳工**!".

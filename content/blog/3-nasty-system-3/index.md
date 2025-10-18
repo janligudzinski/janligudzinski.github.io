@@ -534,7 +534,18 @@ However, these per-table repositories are plainly retarded. The point of entry t
 
 ### Placing other application-level concerns in the domain layer
 
-The repository traits are not the only traits defined in the domain layer when they should be specified by the application layer that actually uses them. At a gallop,
+The repository traits are not the only traits defined in the domain layer when they should be specified by the application layer that actually uses them. Without really thinking about it, as soon as I was done with the repositories, I galloped into defining in the `domain` crate all these things that our actual domain (work tickets concerning buildings in the care of a managing entity who pays us to execute them) has no knowledge or need to know about, namely:
+
+- the session store users use to log in and out
+- the password reset token store thanks to which the reset password links have a limited service lifetime
+- the thumbnail-generating service
+- the PDF generator
+- the email client
+
+>![skull](skull-spin.gif)
+>*What?*
+
+Yeah, not exactly correct DDD.
 
 ## Footnotes
 

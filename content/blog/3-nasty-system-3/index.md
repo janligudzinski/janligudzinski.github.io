@@ -545,7 +545,16 @@ The repository traits are not the only traits defined in the domain layer when t
 >![skull](skull-spin.gif)
 >*What?*
 
-Yeah, not exactly correct DDD.
+Yeah, not exactly correct DDD. Let's correct that:
+
+![pr-4](pr-4.png)
+
+We're no longer net code-line-negative, and our PDF-generating crate still depends on the domain layer since it naively takes domain structs rather than a single DTO defined at the app level, as does the cache crate as the "user session" bundle is defined by the domain, but it's an improvement. The next big wave of refactoring will likely be spent rethinking what endpoints we actually need (I've spotted at least two that are essentially duplicates of each other) and how that translates into commands and queries.
+
+## Takeaways
+
+- Automatic backups are simple and easy. Like CI/CD, you should just do them upfront.
+- When you have some kind of layered design philosophy that relies on abstractions and implementations living apart, the abstractions *must* get defined in the layer that actually uses them.
 
 ## Footnotes
 
